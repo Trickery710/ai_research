@@ -5,6 +5,7 @@ services:
   postgres:
     image: ankane/pgvector:latest
     container_name: refinery_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: refinery
       POSTGRES_PASSWORD: refinery
@@ -25,6 +26,7 @@ services:
   redis:
     image: redis:7
     container_name: refinery_redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:
@@ -38,6 +40,7 @@ services:
   minio:
     image: minio/minio
     container_name: refinery_minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -64,6 +67,7 @@ services:
   llm-embed:
     image: ollama/ollama
     container_name: refinery_llm_embed
+    restart: unless-stopped
     ports:
       - "11434:11434"
     volumes:
@@ -90,6 +94,7 @@ services:
   llm-reason:
     image: ollama/ollama
     container_name: refinery_llm_reason
+    restart: unless-stopped
     ports:
       - "11435:11434"
     volumes:
@@ -119,6 +124,7 @@ services:
   backend:
     build: ./backend
     container_name: refinery_backend
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -143,6 +149,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     networks:
       - refinery
 
@@ -154,6 +161,7 @@ services:
       context: ./workers
       dockerfile: chunking/Dockerfile
     container_name: refinery_worker_chunking
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -179,6 +187,7 @@ services:
       context: ./workers
       dockerfile: embedding/Dockerfile
     container_name: refinery_worker_embedding
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -202,6 +211,7 @@ services:
       context: ./workers
       dockerfile: evaluation/Dockerfile
     container_name: refinery_worker_evaluation
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -225,6 +235,7 @@ services:
       context: ./workers
       dockerfile: extraction/Dockerfile
     container_name: refinery_worker_extraction
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -248,6 +259,7 @@ services:
       context: ./workers
       dockerfile: conflict/Dockerfile
     container_name: refinery_worker_conflict
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -267,6 +279,7 @@ services:
       context: ./workers
       dockerfile: crawler/Dockerfile
     container_name: refinery_worker_crawler
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
