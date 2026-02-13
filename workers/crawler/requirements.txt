@@ -1,0 +1,7 @@
+psycopg2-binary
+redis
+requests
+minio
+beautifulsoup4
+lxml
+PyPDF2

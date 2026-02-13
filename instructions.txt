@@ -1,0 +1,368 @@
+AI Research Refinery v2
+
+Self-Hosted Automotive Knowledge Engine
+
+1. System Requirements
+Hardware (Your P340 is perfect)
+
+64GB RAM ✅
+
+NVIDIA 3080
+
+NVIDIA 3070
+
+NVIDIA P1000 (optional for display)
+
+NVMe storage recommended
+
+Software Required
+
+Install on host:
+
+docker --version
+docker compose version
+nvidia-smi
+
+
+If Docker is missing:
+
+sudo apt install docker.io docker-compose-plugin
+
+2. Enable NVIDIA GPU for Docker
+
+This is critical for Ollama to use your GPUs.
+
+Install NVIDIA Container Toolkit
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+sudo apt update
+sudo apt install -y nvidia-container-toolkit
+sudo systemctl restart docker
+
+
+Verify:
+
+docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi
+
+
+If GPUs show → you're ready.
+
+3. Install the Stack
+
+Download the zip:
+
+ai_research_refinery_v2_full_stack.zip
+
+
+Extract:
+
+unzip ai_research_refinery_v2_full_stack.zip
+cd ai_research_refinery_v2
+
+
+Start everything:
+
+docker compose up --build
+
+4. Services Overview
+
+After startup:
+
+Service	Purpose	URL
+PostgreSQL + pgvector	Main database	localhost:5432
+Redis	Job queue	localhost:6379
+MinIO	Object storage	http://localhost:9001
+
+Backend (FastAPI)	API layer	http://localhost:8000
+
+Worker	Background processor	internal
+Ollama	Local LLM server	http://localhost:11434
+5. Pull a Model Into Ollama
+
+Enter container:
+
+docker exec -it refinery_llm ollama pull llama3
+
+
+Or use a larger model:
+
+docker exec -it refinery_llm ollama pull mixtral
+
+
+Your 3080 + 3070 can handle large models.
+
+6. System Architecture
+Ingestion Flow
+POST /ingest
+    ↓
+Document stored in research.documents
+    ↓
+Redis job created
+    ↓
+Worker picks job
+    ↓
+Text chunked
+    ↓
+Stored in research.document_chunks
+    ↓
+(Next stage: evaluation & extraction)
+
+7. Using the API
+Health Check
+curl http://localhost:8000/health
+
+
+Expected:
+
+{"status":"running"}
+
+Ingest a Document
+
+Example:
+
+curl -X POST http://localhost:8000/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "OBD-II Standard",
+    "source_url": "https://example.com/obd",
+    "content": "P0171 System Too Lean Bank 1..."
+}'
+
+
+Response:
+
+{
+  "status": "queued",
+  "id": "UUID"
+}
+
+
+The worker will automatically chunk it.
+
+8. Database Structure
+research schema (Raw Layer)
+documents
+
+Stores:
+
+Title
+
+URL
+
+Hash
+
+Processing stage
+
+document_chunks
+
+Stores:
+
+Text chunks
+
+Vector embedding column (ready)
+
+Reference to original document
+
+refined schema (Structured Layer)
+
+Currently includes:
+
+dtc_codes
+
+code
+
+description
+
+confidence_score
+
+This is where extracted structured knowledge goes.
+
+9. How Autonomous Refinement Will Work (Next Stage)
+
+You will add:
+
+Evaluation Agent
+
+Scores trust
+
+Scores automotive relevance
+
+Embedding Agent
+
+Calls Ollama embedding model
+
+Stores vectors in pgvector
+
+Extraction Agent
+
+Extracts:
+
+DTC codes
+
+Causes
+
+Diagnostic steps
+
+TSB links
+
+Conflict Resolver
+
+Merges duplicate DTC entries
+
+Increases confidence score
+
+10. GPU Optimization for Ollama
+
+By default Ollama may not use all GPUs.
+
+To control GPU usage, modify docker-compose:
+
+Under llm:
+
+deploy:
+  resources:
+    reservations:
+      devices:
+        - capabilities: [gpu]
+
+
+Or explicitly:
+
+runtime: nvidia
+
+
+Then restart:
+
+docker compose down
+docker compose up --build
+
+
+Check GPU usage:
+
+watch -n1 nvidia-smi
+
+11. Cold Storage Strategy (Future)
+
+When documents are processed:
+
+Move file to MinIO cold bucket
+
+Mark archived = true
+
+Keep metadata + hash
+
+MinIO supports lifecycle rules for automatic tiering.
+
+12. Backups
+
+Backup Postgres:
+
+docker exec refinery_postgres pg_dump -U refinery refinery > backup.sql
+
+
+Backup MinIO data:
+
+docker volume inspect ai_research_refinery_v2_minio_data
+
+13. Scaling on Your Hardware
+
+You have:
+
+2 powerful GPUs
+
+64GB RAM
+
+You can:
+
+Run separate evaluation and extraction workers
+
+Assign different models per GPU
+
+Run larger reasoning models for extraction
+
+Run smaller models for embeddings
+
+Future design:
+
+GPU 0 → Embeddings
+GPU 1 → Reasoning
+
+14. Recommended Next Enhancements
+
+High priority:
+
+Add embedding generation to worker
+
+Add evaluation scoring agent
+
+Add structured extraction prompts
+
+Add crawling module
+
+Add web dashboard
+
+Advanced:
+
+Confidence merging logic
+
+Versioning system
+
+Human validation UI
+
+Repair outcome feedback loop
+
+15. Troubleshooting
+Containers not starting
+docker compose logs
+
+Database connection issues
+
+Check:
+
+docker ps
+
+
+Ensure postgres container is running.
+
+GPU not detected
+
+Inside LLM container:
+
+docker exec -it refinery_llm nvidia-smi
+
+
+If empty → NVIDIA container toolkit not configured.
+
+16. What You Have Built
+
+This is not a simple database.
+
+This is:
+
+A document refinery
+
+A vector knowledge system
+
+A traceable intelligence engine
+
+A foundation for autonomous automotive AI
+
+Next Step Decision
+
+We now need to choose the next layer:
+
+Add automated embeddings
+
+Add document evaluation agent
+
+Add structured DTC extraction agent
+
+Add crawling & bulk ingestion
+
+Build web dashboard
+
+Build autonomous multi-agent loop
+
+Pick one and we’ll continue expanding this into a full automotive intelligence platform.

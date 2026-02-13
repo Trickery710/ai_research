@@ -1,0 +1,298 @@
+services:
+  # ----------------------------------------------------------
+  # INFRASTRUCTURE
+  # ----------------------------------------------------------
+  postgres:
+    image: ankane/pgvector:latest
+    container_name: refinery_postgres
+    environment:
+      POSTGRES_USER: refinery
+      POSTGRES_PASSWORD: refinery
+      POSTGRES_DB: refinery
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U refinery -d refinery"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - refinery
+
+  redis:
+    image: redis:7
+    container_name: refinery_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - refinery
+
+  minio:
+    image: minio/minio
+    container_name: refinery_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - refinery
+
+  # ----------------------------------------------------------
+  # LLM SERVICES (GPU-accelerated Ollama instances)
+  # GPU assignment is controlled via .env file:
+  #   Single GPU (default):  GPU_EMBED=all, GPU_REASON=all (shared)
+  #   Dual GPU (production): GPU_EMBED=0,   GPU_REASON=1   (isolated)
+  # ----------------------------------------------------------
+  llm-embed:
+    image: ollama/ollama
+    container_name: refinery_llm_embed
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_embed_data:/root/.ollama
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      NVIDIA_VISIBLE_DEVICES: ${GPU_EMBED:-all}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - refinery
+
+  llm-reason:
+    image: ollama/ollama
+    container_name: refinery_llm_reason
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama_reason_data:/root/.ollama
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      NVIDIA_VISIBLE_DEVICES: ${GPU_REASON:-all}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - refinery
+
+  # ----------------------------------------------------------
+  # BACKEND API
+  # ----------------------------------------------------------
+  backend:
+    build: ./backend
+    container_name: refinery_backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: documents
+      OLLAMA_EMBED_URL: "http://llm-embed:11434"
+      EMBEDDING_MODEL: nomic-embed-text
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - refinery
+
+  # ----------------------------------------------------------
+  # WORKERS
+  # ----------------------------------------------------------
+  worker-chunking:
+    build:
+      context: ./workers
+      dockerfile: chunking/Dockerfile
+    container_name: refinery_worker_chunking
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: documents
+      WORKER_QUEUE: "jobs:chunk"
+      NEXT_QUEUE: "jobs:embed"
+    networks:
+      - refinery
+
+  worker-embedding:
+    build:
+      context: ./workers
+      dockerfile: embedding/Dockerfile
+    container_name: refinery_worker_embedding
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm-embed:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OLLAMA_BASE_URL: "http://llm-embed:11434"
+      EMBEDDING_MODEL: nomic-embed-text
+      WORKER_QUEUE: "jobs:embed"
+      NEXT_QUEUE: "jobs:evaluate"
+    networks:
+      - refinery
+
+  worker-evaluation:
+    build:
+      context: ./workers
+      dockerfile: evaluation/Dockerfile
+    container_name: refinery_worker_evaluation
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm-reason:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OLLAMA_BASE_URL: "http://llm-reason:11434"
+      REASONING_MODEL: llama3
+      WORKER_QUEUE: "jobs:evaluate"
+      NEXT_QUEUE: "jobs:extract"
+    networks:
+      - refinery
+
+  worker-extraction:
+    build:
+      context: ./workers
+      dockerfile: extraction/Dockerfile
+    container_name: refinery_worker_extraction
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm-reason:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OLLAMA_BASE_URL: "http://llm-reason:11434"
+      REASONING_MODEL: llama3
+      WORKER_QUEUE: "jobs:extract"
+      NEXT_QUEUE: "jobs:resolve"
+    networks:
+      - refinery
+
+  worker-conflict:
+    build:
+      context: ./workers
+      dockerfile: conflict/Dockerfile
+    container_name: refinery_worker_conflict
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      WORKER_QUEUE: "jobs:resolve"
+      NEXT_QUEUE: ""
+    networks:
+      - refinery
+
+  worker-crawler:
+    build:
+      context: ./workers
+      dockerfile: crawler/Dockerfile
+    container_name: refinery_worker_crawler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: documents
+      WORKER_QUEUE: "jobs:crawl"
+      NEXT_QUEUE: "jobs:chunk"
+    networks:
+      - refinery
+
+networks:
+  refinery:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:
+  ollama_embed_data:
+  ollama_reason_data:
