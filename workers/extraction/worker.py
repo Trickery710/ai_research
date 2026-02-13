@@ -113,6 +113,22 @@ def parse_extraction(response_text):
     }
 
 
+def _to_str_list(val):
+    """Ensure a value is a list of strings for TEXT[] columns."""
+    if isinstance(val, list):
+        return [str(v) for v in val if not isinstance(v, dict)]
+    if isinstance(val, str):
+        return [val]
+    return []
+
+
+def _safe_str(val, default=""):
+    """Convert a value to string, returning default if it's a dict/list."""
+    if isinstance(val, (dict, list)):
+        return json.dumps(val)
+    return str(val) if val else default
+
+
 def store_extraction(chunk_id, data):
     """Insert extracted data into the refined schema tables.
 
@@ -149,8 +165,9 @@ def store_extraction(chunk_id, data):
                    source_count = refined.dtc_codes.source_count + 1,
                    updated_at = NOW()
                    RETURNING id""",
-                (code, dtc.get("description", ""),
-                 dtc.get("category", ""), dtc.get("severity", ""))
+                (code, _safe_str(dtc.get("description", "")),
+                 _safe_str(dtc.get("category", "")),
+                 _safe_str(dtc.get("severity", "")))
             )
             dtc_row = cur.fetchone()
             if not dtc_row:
@@ -178,7 +195,8 @@ def store_extraction(chunk_id, data):
                         source_chunk_id, confidence_score)
                        VALUES (%s, %s, %s, %s, 0.5)""",
                     (dtc_id, desc,
-                     cause.get("likelihood", "medium"), chunk_id)
+                     _safe_str(cause.get("likelihood", "medium")),
+                     chunk_id)
                 )
 
             # --- DIAGNOSTIC STEPS for this DTC ---
@@ -194,8 +212,9 @@ def store_extraction(chunk_id, data):
                         expected_values, source_chunk_id, confidence_score)
                        VALUES (%s, %s, %s, %s, %s, %s, 0.5)""",
                     (dtc_id, step.get("step_order", 0), desc,
-                     step.get("tools_required", ""),
-                     step.get("expected_values", ""), chunk_id)
+                     _safe_str(step.get("tools_required", "")),
+                     _safe_str(step.get("expected_values", "")),
+                     chunk_id)
                 )
 
         # --- SENSORS (not DTC-specific) ---
@@ -217,9 +236,9 @@ def store_extraction(chunk_id, data):
                        NULLIF(EXCLUDED.unit, ''),
                        refined.sensors.unit)""",
                 (name, sensor_type,
-                 sensor.get("typical_range", ""),
-                 sensor.get("unit", ""),
-                 sensor.get("related_dtc_codes", []),
+                 _safe_str(sensor.get("typical_range", "")),
+                 _safe_str(sensor.get("unit", "")),
+                 _to_str_list(sensor.get("related_dtc_codes", [])),
                  chunk_id)
             )
 
@@ -240,10 +259,10 @@ def store_extraction(chunk_id, data):
                    summary = COALESCE(
                        NULLIF(EXCLUDED.summary, ''),
                        refined.tsb_references.summary)""",
-                (tsb_num, tsb.get("title", ""),
-                 tsb.get("affected_models", ""),
-                 tsb.get("related_dtc_codes", []),
-                 tsb.get("summary", ""), chunk_id)
+                (tsb_num, _safe_str(tsb.get("title", "")),
+                 _safe_str(tsb.get("affected_models", "")),
+                 _to_str_list(tsb.get("related_dtc_codes", [])),
+                 _safe_str(tsb.get("summary", "")), chunk_id)
             )
 
         conn.commit()
