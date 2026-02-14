@@ -1,368 +1,267 @@
-AI Research Refinery v2
+AI Research Refinery v3
 
-Self-Hosted Automotive Knowledge Engine
+Self-Hosted Autonomous Automotive Knowledge Engine
 
 1. System Requirements
-Hardware (Your P340 is perfect)
 
-64GB RAM ✅
-
-NVIDIA 3080
-
-NVIDIA 3070
-
-NVIDIA P1000 (optional for display)
-
-NVMe storage recommended
+Hardware (P340 Configuration)
+  64GB RAM
+  NVIDIA 3080 (GPU 0 - Embeddings)
+  NVIDIA 3070 (GPU 1 - Reasoning)
+  NVIDIA P1000 (optional, display)
+  NVMe storage recommended
 
 Software Required
-
-Install on host:
-
-docker --version
-docker compose version
-nvidia-smi
-
+  docker --version
+  docker compose version
+  nvidia-smi
 
 If Docker is missing:
-
-sudo apt install docker.io docker-compose-plugin
+  sudo apt install docker.io docker-compose-plugin
 
 2. Enable NVIDIA GPU for Docker
 
-This is critical for Ollama to use your GPUs.
-
-Install NVIDIA Container Toolkit
-distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
-curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-
-sudo apt update
-sudo apt install -y nvidia-container-toolkit
-sudo systemctl restart docker
-
+Install NVIDIA Container Toolkit:
+  distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+  curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
+  curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  sudo apt update
+  sudo apt install -y nvidia-container-toolkit
+  sudo systemctl restart docker
 
 Verify:
-
-docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi
-
-
-If GPUs show → you're ready.
-
-3. Install the Stack
-
-Download the zip:
-
-ai_research_refinery_v2_full_stack.zip
-
-
-Extract:
-
-unzip ai_research_refinery_v2_full_stack.zip
-cd ai_research_refinery_v2
-
-
-Start everything:
-
-docker compose up --build
-
-4. Services Overview
-
-After startup:
-
-Service	Purpose	URL
-PostgreSQL + pgvector	Main database	localhost:5432
-Redis	Job queue	localhost:6379
-MinIO	Object storage	http://localhost:9001
-
-Backend (FastAPI)	API layer	http://localhost:8000
-
-Worker	Background processor	internal
-Ollama	Local LLM server	http://localhost:11434
-5. Pull a Model Into Ollama
-
-Enter container:
-
-docker exec -it refinery_llm ollama pull llama3
-
-
-Or use a larger model:
-
-docker exec -it refinery_llm ollama pull mixtral
-
-
-Your 3080 + 3070 can handle large models.
-
-6. System Architecture
-Ingestion Flow
-POST /ingest
-    ↓
-Document stored in research.documents
-    ↓
-Redis job created
-    ↓
-Worker picks job
-    ↓
-Text chunked
-    ↓
-Stored in research.document_chunks
-    ↓
-(Next stage: evaluation & extraction)
-
-7. Using the API
-Health Check
-curl http://localhost:8000/health
-
-
-Expected:
-
-{"status":"running"}
-
-Ingest a Document
-
-Example:
-
-curl -X POST http://localhost:8000/ingest \
-  -H "Content-Type: application/json" \
-  -d '{
-    "title": "OBD-II Standard",
-    "source_url": "https://example.com/obd",
-    "content": "P0171 System Too Lean Bank 1..."
-}'
-
-
-Response:
-
-{
-  "status": "queued",
-  "id": "UUID"
-}
-
-
-The worker will automatically chunk it.
-
-8. Database Structure
-research schema (Raw Layer)
-documents
-
-Stores:
-
-Title
-
-URL
-
-Hash
-
-Processing stage
-
-document_chunks
-
-Stores:
-
-Text chunks
-
-Vector embedding column (ready)
-
-Reference to original document
-
-refined schema (Structured Layer)
-
-Currently includes:
-
-dtc_codes
-
-code
-
-description
-
-confidence_score
-
-This is where extracted structured knowledge goes.
-
-9. How Autonomous Refinement Will Work (Next Stage)
-
-You will add:
-
-Evaluation Agent
-
-Scores trust
-
-Scores automotive relevance
-
-Embedding Agent
-
-Calls Ollama embedding model
-
-Stores vectors in pgvector
-
-Extraction Agent
-
-Extracts:
-
-DTC codes
-
-Causes
-
-Diagnostic steps
-
-TSB links
-
-Conflict Resolver
-
-Merges duplicate DTC entries
-
-Increases confidence score
-
-10. GPU Optimization for Ollama
-
-By default Ollama may not use all GPUs.
-
-To control GPU usage, modify docker-compose:
-
-Under llm:
-
-deploy:
-  resources:
-    reservations:
-      devices:
-        - capabilities: [gpu]
-
-
-Or explicitly:
-
-runtime: nvidia
-
-
-Then restart:
-
-docker compose down
-docker compose up --build
-
-
-Check GPU usage:
-
-watch -n1 nvidia-smi
-
-11. Cold Storage Strategy (Future)
-
-When documents are processed:
-
-Move file to MinIO cold bucket
-
-Mark archived = true
-
-Keep metadata + hash
-
-MinIO supports lifecycle rules for automatic tiering.
-
-12. Backups
+  docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi
+
+3. Getting Started
+
+  cd ai_research
+  docker compose up --build
+
+First startup pulls Ollama models (nomic-embed-text, llama3) automatically.
+This may take several minutes.
+
+4. Architecture Overview (18 Containers)
+
+Infrastructure (5 services):
+  Service              Purpose                        Port
+  PostgreSQL+pgvector  Database with vector search     localhost:5432
+  Redis                Job queues & rate limiting      localhost:6379
+  MinIO                Object/document storage         localhost:9000 (API), 9001 (console)
+  Ollama (embed)       Embedding model server          localhost:11434
+  Ollama (reason)      Reasoning model server          localhost:11435
+
+Application Layer (1 service):
+  Backend (FastAPI)    REST API                        localhost:8000
+
+Pipeline Workers (6 services):
+  worker-crawler       Fetches URLs, extracts text     jobs:crawl -> jobs:chunk
+  worker-chunking      Splits documents into chunks    jobs:chunk -> jobs:embed
+  worker-embedding     Generates vector embeddings     jobs:embed -> jobs:evaluate
+  worker-evaluation    LLM scores trust/relevance      jobs:evaluate -> jobs:extract
+  worker-extraction    Extracts DTCs, causes, steps    jobs:extract -> jobs:resolve
+  worker-conflict      Resolves duplicate entities     jobs:resolve -> (terminal)
+
+Monitoring & Self-Healing (2 services):
+  monitor-agent        Metrics collection, alerting    localhost:8001
+  healing-agent        Auto-fixes pipeline issues      (internal)
+
+Autonomous Orchestration (4 services):
+  orchestrator         OODA loop, task management      (internal)
+  auditor              Quality/coverage analysis       (internal)
+  researcher           URL discovery & submission      (internal)
+  mcp-server           MCP knowledge API (SSE)         localhost:8002
+
+5. Processing Pipeline
+
+Documents flow through a 6-stage pipeline:
+
+  POST /crawl or POST /ingest
+      |
+  Crawl -> Chunk -> Embed -> Evaluate -> Extract -> Resolve
+      |         |        |          |          |         |
+  Fetch URL  500-char  768-dim   Trust &   DTCs,     Merge
+  or store   chunks    vectors   relevance causes,   duplicates
+  in MinIO   w/overlap           scoring   steps
+
+Each stage passes document IDs through Redis queues (FIFO via LPUSH/BRPOP).
+
+6. Autonomous Operation
+
+The system runs autonomously once started:
+
+  Orchestrator (60s cycle):
+    1. Observe - collect queue depths, task statuses, audit data
+    2. Orient  - assess resource availability, coverage gaps
+    3. Decide  - rule-based for routine, LLM for strategic planning
+    4. Act     - dispatch research tasks, trigger audits, or wait
+
+  Auditor (30-min cycle):
+    - Confidence score distributions across all DTC codes
+    - Completeness scoring per DTC (description, causes, steps, sensors, TSBs)
+    - DTC range gap detection (e.g., P02xx has 5 codes, expected ~30)
+    - Pipeline throughput, error rates, bottleneck detection
+    - Stores reports in research.audit_reports
+
+  Researcher (directive-driven):
+    - Tier 1: Deterministic URL templates (obd-codes.com, engine-codes.com, etc.)
+    - Tier 2: LLM-suggested URLs from known automotive resources
+    - Rate limited: 30 URLs/hr total, 5/domain/hr, 30s cooldown
+    - Validates URLs via HEAD request before submitting to crawl pipeline
+
+  MCP Server (port 8002):
+    - lookup_dtc: Full DTC detail with causes, steps, sensors, TSBs
+    - search_knowledge: Semantic vector search across knowledge base
+    - list_dtc_codes: List/filter codes by category and confidence
+    - get_system_stats: Coverage and quality metrics
+
+Inter-Agent Communication (Redis queues):
+  orchestrator:research   orchestrator -> researcher
+  orchestrator:audit      orchestrator -> auditor
+  orchestrator:commands   auditor/researcher/API -> orchestrator
+
+Resource Protection:
+  - GPU available = evaluate + extract + embed queues < 20
+  - Crawl slots available = crawl + chunk queues < 5
+  - If pipeline busy, orchestrator defers new work
+  - Existing pipeline workers always have priority
+
+Environment Toggles:
+  ORCHESTRATOR_AUTO_RESEARCH=true/false  Enable/disable autonomous research
+  ORCHESTRATOR_CYCLE=60                  Seconds between orchestrator cycles
+  AUDIT_INTERVAL=1800                    Seconds between automatic audits
+  MAX_URLS_PER_HOUR=30                   Global URL submission rate limit
+  MAX_PER_DOMAIN_PER_HOUR=5             Per-domain rate limit
+
+7. API Reference
+
+Health & Status:
+  GET  /health                  System health (DB, Redis, MinIO connectivity)
+  GET  /stats                   Document counts, queue depths, DTC stats
+
+Document Management:
+  POST /ingest                  Ingest raw text content
+  POST /crawl                   Submit URL for crawling
+  GET  /crawl                   List crawl queue entries
+  GET  /documents               List documents (optional stage filter)
+  GET  /documents/{id}          Document detail
+  GET  /documents/{id}/chunks   Document chunks with evaluation scores
+  GET  /documents/{id}/status   Processing status with full log
+
+Search & Knowledge:
+  POST /search                  Semantic vector search
+  GET  /dtc                     List DTC codes (filter by category/confidence)
+  GET  /dtc/{code}              Full DTC detail (causes, steps, sensors, TSBs)
+
+Orchestration:
+  GET  /orchestrator/status     Current orchestrator state and cycle info
+  GET  /orchestrator/tasks      List orchestrator tasks (filter by status/type)
+  POST /orchestrator/command    Submit manual command (trigger_audit, trigger_research)
+  GET  /audit/latest            Latest audit report
+  GET  /audit/reports           List audit reports
+  GET  /coverage                Latest coverage snapshot
+  GET  /research/plans          List research plans
+  GET  /research/sources        List known source domains with quality tiers
+
+8. Database Schema
+
+research schema (Raw/Processing Layer):
+  documents              Document metadata and processing state
+  document_chunks        Chunked text with 768-dim vector embeddings
+  chunk_evaluations      LLM trust/relevance scores per chunk
+  crawl_queue            URL crawl job tracking
+  processing_log         Audit log for all pipeline stages
+  healing_log            Self-healing action audit trail
+  orchestrator_tasks     Task management for orchestrator
+  orchestrator_log       Orchestrator cycle audit trail
+  research_sources       Domain quality and crawl tracking
+  research_plans         Research plan tracking
+  audit_reports          Quality audit reports
+  coverage_snapshots     Daily DTC coverage snapshots
+
+refined schema (Structured Knowledge Layer):
+  dtc_codes              Diagnostic trouble codes with confidence scores
+  dtc_sources            Links DTC codes to source chunks
+  diagnostic_steps       Step-by-step diagnostic procedures
+  causes                 Root causes per DTC code
+  sensors                Automotive sensor catalog
+  tsb_references         Technical Service Bulletins
+
+9. GPU Configuration
+
+Controlled via .env file:
+  Single GPU (shared):   GPU_EMBED=all  GPU_REASON=all
+  Dual GPU (isolated):   GPU_EMBED=0    GPU_REASON=1
+
+Monitor GPU usage:
+  watch -n1 nvidia-smi
+
+10. Common Operations
+
+Submit a URL for autonomous processing:
+  curl -X POST http://localhost:8000/crawl \
+    -H "Content-Type: application/json" \
+    -d '{"url": "https://www.obd-codes.com/p0301"}'
+
+Trigger a manual audit:
+  curl -X POST http://localhost:8000/orchestrator/command \
+    -H "Content-Type: application/json" \
+    -d '{"action": "trigger_audit"}'
+
+Trigger research for specific codes:
+  curl -X POST http://localhost:8000/orchestrator/command \
+    -H "Content-Type: application/json" \
+    -d '{"action": "trigger_research", "target_codes": ["P0301", "P0302"]}'
+
+Check system status:
+  curl http://localhost:8000/stats
+  curl http://localhost:8000/orchestrator/status
+  curl http://localhost:8000/audit/latest
+  curl http://localhost:8000/coverage
+
+Search the knowledge base:
+  curl -X POST http://localhost:8000/search \
+    -H "Content-Type: application/json" \
+    -d '{"query": "P0301 misfire causes", "limit": 5}'
+
+Look up a DTC code:
+  curl http://localhost:8000/dtc/P0301
+
+Connect MCP client to:
+  http://localhost:8002/sse
+
+11. Backups
 
 Backup Postgres:
+  docker exec refinery_postgres pg_dump -U refinery refinery > backup.sql
 
-docker exec refinery_postgres pg_dump -U refinery refinery > backup.sql
+Restore:
+  cat backup.sql | docker exec -i refinery_postgres psql -U refinery refinery
 
+MinIO data is in the minio_data Docker volume.
 
-Backup MinIO data:
+12. Troubleshooting
 
-docker volume inspect ai_research_refinery_v2_minio_data
+View logs for any service:
+  docker compose logs -f orchestrator
+  docker compose logs -f auditor
+  docker compose logs -f researcher
+  docker compose logs -f mcp-server
+  docker compose logs -f worker-crawler
 
-13. Scaling on Your Hardware
+Check container status:
+  docker compose ps
 
-You have:
+Restart a specific service:
+  docker compose restart orchestrator
 
-2 powerful GPUs
+GPU not detected in Ollama:
+  docker exec -it refinery_llm_embed nvidia-smi
+  If empty -> NVIDIA container toolkit not configured (see section 2)
 
-64GB RAM
+Database connection issues:
+  docker compose logs postgres
+  Ensure postgres container is healthy: docker compose ps
 
-You can:
-
-Run separate evaluation and extraction workers
-
-Assign different models per GPU
-
-Run larger reasoning models for extraction
-
-Run smaller models for embeddings
-
-Future design:
-
-GPU 0 → Embeddings
-GPU 1 → Reasoning
-
-14. Recommended Next Enhancements
-
-High priority:
-
-Add embedding generation to worker
-
-Add evaluation scoring agent
-
-Add structured extraction prompts
-
-Add crawling module
-
-Add web dashboard
-
-Advanced:
-
-Confidence merging logic
-
-Versioning system
-
-Human validation UI
-
-Repair outcome feedback loop
-
-15. Troubleshooting
-Containers not starting
-docker compose logs
-
-Database connection issues
-
-Check:
-
-docker ps
-
-
-Ensure postgres container is running.
-
-GPU not detected
-
-Inside LLM container:
-
-docker exec -it refinery_llm nvidia-smi
-
-
-If empty → NVIDIA container toolkit not configured.
-
-16. What You Have Built
-
-This is not a simple database.
-
-This is:
-
-A document refinery
-
-A vector knowledge system
-
-A traceable intelligence engine
-
-A foundation for autonomous automotive AI
-
-Next Step Decision
-
-We now need to choose the next layer:
-
-Add automated embeddings
-
-Add document evaluation agent
-
-Add structured DTC extraction agent
-
-Add crawling & bulk ingestion
-
-Build web dashboard
-
-Build autonomous multi-agent loop
-
-Pick one and we’ll continue expanding this into a full automotive intelligence platform.
+Reset database (destructive):
+  docker compose down -v
+  docker compose up --build
