@@ -143,7 +143,7 @@ def store_extraction(chunk_id, data):
 
         # --- DTC CODES ---
         for dtc in data.get("dtc_codes", []):
-            code = dtc.get("code", "").strip().upper()
+            code = (dtc.get("code") or "").strip().upper()
             if not code:
                 continue
 
@@ -184,9 +184,9 @@ def store_extraction(chunk_id, data):
 
             # --- CAUSES for this DTC ---
             for cause in data.get("causes", []):
-                if cause.get("dtc_code", "").strip().upper() != code:
+                if (cause.get("dtc_code") or "").strip().upper() != code:
                     continue
-                desc = cause.get("description", "").strip()
+                desc = (cause.get("description") or "").strip()
                 if not desc:
                     continue
                 cur.execute(
@@ -201,9 +201,9 @@ def store_extraction(chunk_id, data):
 
             # --- DIAGNOSTIC STEPS for this DTC ---
             for step in data.get("diagnostic_steps", []):
-                if step.get("dtc_code", "").strip().upper() != code:
+                if (step.get("dtc_code") or "").strip().upper() != code:
                     continue
-                desc = step.get("description", "").strip()
+                desc = (step.get("description") or "").strip()
                 if not desc:
                     continue
                 cur.execute(
@@ -219,10 +219,10 @@ def store_extraction(chunk_id, data):
 
         # --- SENSORS (not DTC-specific) ---
         for sensor in data.get("sensors", []):
-            name = sensor.get("name", "").strip()
+            name = (sensor.get("name") or "").strip()
             if not name:
                 continue
-            sensor_type = sensor.get("sensor_type", "")
+            sensor_type = (sensor.get("sensor_type") or "").strip()
             cur.execute(
                 """INSERT INTO refined.sensors
                    (name, sensor_type, typical_range, unit,
@@ -244,7 +244,7 @@ def store_extraction(chunk_id, data):
 
         # --- TSB REFERENCES ---
         for tsb in data.get("tsb_references", []):
-            tsb_num = tsb.get("tsb_number", "").strip()
+            tsb_num = (tsb.get("tsb_number") or "").strip()
             if not tsb_num:
                 continue
             cur.execute(

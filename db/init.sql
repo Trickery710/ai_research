@@ -177,3 +177,26 @@ CREATE TABLE IF NOT EXISTS refined.tsb_references (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     UNIQUE(tsb_number)
 );
+
+-- ==========================================================
+-- MONITORING & HEALING SCHEMA
+-- ==========================================================
+
+CREATE TABLE IF NOT EXISTS research.healing_log (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    alert_id TEXT,
+    action_type TEXT NOT NULL,
+    component TEXT,
+    decision TEXT NOT NULL,
+    success BOOLEAN,
+    result TEXT,
+    llm_reasoning TEXT,
+    reason TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_healing_log_created
+    ON research.healing_log(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_healing_log_component
+    ON research.healing_log(component, created_at DESC);

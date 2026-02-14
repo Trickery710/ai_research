@@ -300,6 +300,74 @@ services:
     networks:
       - refinery
 
+  # ----------------------------------------------------------
+  # MONITORING & SELF-HEALING
+  # ----------------------------------------------------------
+  monitor-agent:
+    build:
+      context: ./workers
+      dockerfile: monitoring/Dockerfile
+    container_name: refinery_monitor_agent
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      BACKEND_URL: "http://backend:8000"
+      MONITOR_INTERVAL: "45"
+      QUEUE_STALL_THRESHOLD: "300"
+      ERROR_RATE_THRESHOLD: "0.15"
+      ALERT_QUEUE: "monitoring:alerts"
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - refinery
+
+  healing-agent:
+    build:
+      context: ./workers
+      dockerfile: healing/Dockerfile
+    container_name: refinery_healing_agent
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm-reason:
+        condition: service_healthy
+      monitor-agent:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OLLAMA_BASE_URL: "http://llm-reason:11434"
+      REASONING_MODEL: llama3
+      AUTO_FIX_ENABLED: "true"
+      AUTO_FIX_ALLOW: "restart_worker,requeue_documents,clear_stale_locks"
+      AUTO_FIX_DENY: "restart_container,database_operations,delete_data"
+      MAX_ACTIONS_PER_HOUR: "10"
+      COOLDOWN_BETWEEN_ACTIONS: "120"
+      ALERT_QUEUE: "monitoring:alerts"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - refinery
+
 networks:
   refinery:
     driver: bridge

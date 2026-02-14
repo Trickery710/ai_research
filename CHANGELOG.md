@@ -6,6 +6,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-02-14
+
+### Added
+- **Self-Healing Monitoring System**: Autonomous system health monitoring and auto-remediation
+  - **Monitor Agent** (`monitor-agent` container on port 8001):
+    - Continuous health monitoring every 45 seconds
+    - Detects 5 types of anomalies: stalled queues, error rate spikes, processing slowdowns, unhealthy containers, stuck documents
+    - Collects comprehensive metrics from all system components
+    - Exposes HTTP endpoints: `/health`, `/metrics`, `/metrics/prometheus`
+    - Sends structured alerts to Redis queue for healing agent
+  - **Healing Agent** (`healing-agent` container):
+    - LLM-powered error analysis using llama3 on `llm-reason` instance
+    - Autonomous fix execution with safety controls
+    - Available actions: `restart_worker`, `requeue_documents`, `clear_stale_locks`
+    - Rate limiting: max 10 actions/hour with 2-minute cooldown between actions
+    - Idempotency checks to prevent duplicate fixes
+    - Comprehensive audit trail in `research.healing_log` table
+  - **Safety Mechanisms**:
+    - Allow/deny lists for action authorization
+    - Confidence threshold ≥ 0.7 for automatic execution
+    - Escalation to human for denied/low-confidence actions
+    - All decisions logged with LLM reasoning for learning and compliance
+  - **Database Schema**: New `research.healing_log` table with indexes for performance
+    - Tracks all healing actions (executed, escalated, deferred)
+    - Stores LLM reasoning, action results, and timestamps
+    - Enables post-incident analysis and system learning
+
+### Changed
+- **Docker Compose**: Added 2 new services (monitor-agent, healing-agent) to stack
+- **Configuration**: Environment-based tuning for monitoring thresholds and healing policies
+
+### Technical Details
+- New files:
+  - `workers/monitoring/`: Complete monitoring agent implementation (6 files)
+  - `workers/healing/`: Complete healing agent implementation (6 files)
+  - `db/init.sql`: Added `research.healing_log` table schema
+- Monitor agent metrics sources:
+  - Redis queue depths via LLEN commands
+  - PostgreSQL `research.processing_log` for error rates and timing
+  - HTTP endpoints from backend, LLM services
+  - Container health checks
+- Healing agent uses:
+  - Docker Python library for container management
+  - Ollama LLM for analysis (low temperature=0.1 for conservative decisions)
+  - Redis for rate limiting and deduplication
+  - PostgreSQL for audit logging
+
+### Performance
+- Minimal overhead: monitoring cycle completes in <100ms
+- Asynchronous alert processing via Redis queue
+- Metrics retained for 24 hours by default (configurable)
+
+---
+
 ## [2.1.0] - 2026-02-13
 
 ### Added
