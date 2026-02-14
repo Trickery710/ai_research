@@ -7,16 +7,16 @@ services:
     container_name: refinery_postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: refinery
-      POSTGRES_PASSWORD: refinery
+      POSTGRES_USER: ${POSTGRES_USER:-refinery}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-refinery}
       POSTGRES_DB: refinery
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U refinery -d refinery"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-refinery} -d refinery"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -27,10 +27,18 @@ services:
     image: redis:7
     container_name: refinery_redis
     restart: unless-stopped
+    command: >
+      sh -c "if [ -f /etc/redis/redis.conf ]; then
+        redis-server /etc/redis/redis.conf;
+      else
+        redis-server;
+      fi"
+    volumes:
+      - ./secrets/redis.conf:/etc/redis/redis.conf:ro
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -43,11 +51,11 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -69,7 +77,7 @@ services:
     container_name: refinery_llm_embed
     restart: unless-stopped
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_embed_data:/root/.ollama
     environment:
@@ -96,7 +104,7 @@ services:
     container_name: refinery_llm_reason
     restart: unless-stopped
     ports:
-      - "11435:11434"
+      - "127.0.0.1:11435:11434"
     volumes:
       - ollama_reason_data:/root/.ollama
     environment:
@@ -133,15 +141,17 @@ services:
       minio:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: documents
       OLLAMA_EMBED_URL: "http://llm-embed:11434"
       EMBEDDING_MODEL: nomic-embed-text
+      API_KEYS: ${API_KEYS:-}
     ports:
       - "8000:8000"
     healthcheck:
@@ -170,12 +180,13 @@ services:
       minio:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: documents
       WORKER_QUEUE: "jobs:chunk"
       NEXT_QUEUE: "jobs:embed"
@@ -196,9 +207,10 @@ services:
       llm-embed:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-embed:11434"
       EMBEDDING_MODEL: nomic-embed-text
       WORKER_QUEUE: "jobs:embed"
@@ -220,9 +232,10 @@ services:
       llm-reason:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
       REASONING_MODEL: llama3
       WORKER_QUEUE: "jobs:evaluate"
@@ -244,9 +257,10 @@ services:
       llm-reason:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
       REASONING_MODEL: llama3
       WORKER_QUEUE: "jobs:extract"
@@ -266,9 +280,10 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       WORKER_QUEUE: "jobs:resolve"
       NEXT_QUEUE: ""
     networks:
@@ -288,12 +303,13 @@ services:
       minio:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: documents
       WORKER_QUEUE: "jobs:crawl"
       NEXT_QUEUE: "jobs:chunk"
@@ -317,16 +333,17 @@ services:
       backend:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       BACKEND_URL: "http://backend:8000"
       MONITOR_INTERVAL: "45"
       QUEUE_STALL_THRESHOLD: "300"
       ERROR_RATE_THRESHOLD: "0.15"
       ALERT_QUEUE: "monitoring:alerts"
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\""]
       interval: 15s
@@ -352,9 +369,10 @@ services:
       monitor-agent:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
       REASONING_MODEL: llama3
       AUTO_FIX_ENABLED: "true"
@@ -383,10 +401,12 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      PYTHONUNBUFFERED: "1"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      AUDIT_INTERVAL: "1800"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      AUDIT_INTERVAL: ${AUDIT_INTERVAL:-1800}
     networks:
       - refinery
 
@@ -402,13 +422,15 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      PYTHONUNBUFFERED: "1"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
       REASONING_MODEL: llama3
-      ORCHESTRATOR_CYCLE: "60"
-      ORCHESTRATOR_AUTO_RESEARCH: "true"
+      ORCHESTRATOR_CYCLE: ${ORCHESTRATOR_CYCLE:-60}
+      ORCHESTRATOR_AUTO_RESEARCH: ${ORCHESTRATOR_AUTO_RESEARCH:-true}
       MAX_GPU_QUEUE_ITEMS: "20"
       MAX_CONCURRENT_CRAWLS: "5"
     networks:
@@ -426,13 +448,15 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      PYTHONUNBUFFERED: "1"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
       REASONING_MODEL: llama3
-      MAX_URLS_PER_HOUR: "30"
-      MAX_PER_DOMAIN_PER_HOUR: "5"
+      MAX_URLS_PER_HOUR: ${MAX_URLS_PER_HOUR:-30}
+      MAX_PER_DOMAIN_PER_HOUR: ${MAX_PER_DOMAIN_PER_HOUR:-5}
       RESEARCH_COOLDOWN: "30"
     networks:
       - refinery
@@ -451,9 +475,11 @@ services:
       llm-embed:
         condition: service_healthy
     environment:
-      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      PYTHONUNBUFFERED: "1"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-embed:11434"
       EMBEDDING_MODEL: nomic-embed-text
     ports:

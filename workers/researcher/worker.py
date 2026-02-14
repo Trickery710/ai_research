@@ -87,7 +87,7 @@ def submit_url(url):
     Returns:
         crawl_id string or None on failure.
     """
-    from researcher.source_registry import get_domain, register_domain
+    from source_registry import get_domain, register_domain
 
     domain = get_domain(url)
     if not domain:
@@ -140,13 +140,13 @@ def handle_research_directive(directive_json):
       - expand_coverage: Explore code ranges for new codes
       - manual: User-initiated research for specific codes
     """
-    from researcher.query_generator import (
+    from query_generator import (
         generate_template_urls,
         generate_urls_for_codes,
         generate_range_urls,
     )
-    from researcher.url_evaluator import validate_url
-    from researcher.source_registry import is_url_already_crawled
+    from url_evaluator import validate_url
+    from source_registry import is_url_already_crawled
 
     try:
         directive = json.loads(directive_json)
@@ -240,7 +240,7 @@ def handle_research_directive(directive_json):
 
 
 def main():
-    from researcher.source_registry import init_default_sources
+    from source_registry import init_default_sources
 
     print(f"[researcher] Worker started. Queue={RESEARCH_QUEUE}")
     print(f"[researcher] Rate limits: {MAX_URLS_PER_HOUR}/hr total, "

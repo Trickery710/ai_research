@@ -2,7 +2,8 @@
 
 Registers all route modules and provides the /health endpoint.
 """
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 import psycopg2
@@ -11,19 +12,25 @@ from minio import Minio
 
 from app.config import Config
 from app.models import HealthResponse
+from app.auth import verify_api_key, AUTH_ENABLED
 from app.routes import ingest, search, documents, dtc, crawl, stats, orchestration
 
 app = FastAPI(
-    title="AI Research Refinery v2",
+    title="AI Research Refinery v3",
     description="Self-Hosted Automotive Knowledge Engine API",
-    version="2.0.0"
+    version="3.0.0",
+    dependencies=[Depends(verify_api_key)] if AUTH_ENABLED else [],
 )
+
+# CORS - restrict origins when configured, open for dev
+_cors_origins = os.environ.get("CORS_ORIGINS", "")
+allowed_origins = [o.strip() for o in _cors_origins.split(",") if o.strip()] if _cors_origins else ["*"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -54,7 +61,11 @@ def health():
         db_status = f"error: {e}"
 
     try:
-        r = redis.Redis(host=Config.REDIS_HOST, port=Config.REDIS_PORT)
+        r = redis.Redis(
+            host=Config.REDIS_HOST,
+            port=Config.REDIS_PORT,
+            password=Config.REDIS_PASSWORD or None,
+        )
         r.ping()
         redis_status = "connected"
     except Exception as e:

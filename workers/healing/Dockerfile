@@ -1,31 +1,37 @@
-FROM python:3.11-slim
+# Multi-stage build for healing worker - extract Docker CLI only
+FROM docker:27-cli AS docker-cli
+
+# Runtime stage
+FROM python:3.11-slim-bookworm
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-# Install Docker CLI (for container restarts)
-RUN apt-get update && apt-get install -y \
-    docker.io \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Copy only Docker CLI binary from official image
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 
-# Optional: Install Claude Code CLI (controlled via build arg)
-ARG CLAUDE_CODE_ENABLED=false
-RUN if [ "$CLAUDE_CODE_ENABLED" = "true" ]; then \
-        curl -fsSL https://claude.com/cli/install.sh | sh; \
-    fi
+# Create non-root user with docker group for socket access
+RUN groupadd -r appuser && groupadd -r docker && \
+    useradd -r -g appuser -G docker appuser
 
-# Install Python dependencies
 COPY healing/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy shared modules
 COPY shared/ ./shared/
-
-# Copy healing modules
 COPY healing/worker.py .
 COPY healing/analyzer.py .
 COPY healing/executor.py .
 COPY healing/safety.py .
 COPY healing/audit_logger.py .
+
+RUN find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+
+RUN chown -R appuser:appuser /app
+
+USER appuser
 
 CMD ["python", "worker.py"]

@@ -172,7 +172,7 @@ def take_coverage_snapshot():
         }
 
     # Compute overall completeness from quality analyzer
-    from auditor.quality_analyzer import compute_dtc_completeness
+    from quality_analyzer import compute_dtc_completeness
     completeness = compute_dtc_completeness()
 
     return {

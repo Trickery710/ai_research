@@ -1,7 +1,7 @@
 """Evaluates and validates URLs before submitting for crawling."""
 import requests
 import os
-from researcher.source_registry import is_url_already_crawled, is_domain_blocked, get_domain
+from source_registry import is_url_already_crawled, is_domain_blocked, get_domain
 
 # Timeout for HEAD request validation
 HEAD_TIMEOUT = int(os.environ.get("URL_CHECK_TIMEOUT", 10))

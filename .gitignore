@@ -1,0 +1,42 @@
+# Secrets - NEVER commit these
+secrets/
+.env.secure
+*.key
+*.csr
+*.srl
+
+# Environment files with credentials
+.env.local
+.env.production
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Backups
+*.sql.bak
+backup*.sql

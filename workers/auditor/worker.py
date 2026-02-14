@@ -20,14 +20,14 @@ AUDIT_INTERVAL = int(__import__("os").environ.get("AUDIT_INTERVAL", 1800))  # 30
 
 def run_full_audit():
     """Execute a complete audit cycle: quality, coverage, pipeline."""
-    from auditor.quality_analyzer import (
+    from quality_analyzer import (
         analyze_confidence_distribution,
         compute_dtc_completeness,
         get_low_confidence_codes,
     )
-    from auditor.coverage_analyzer import analyze_coverage, take_coverage_snapshot
-    from auditor.pipeline_analyzer import get_pipeline_summary
-    from auditor.report_generator import (
+    from coverage_analyzer import analyze_coverage, take_coverage_snapshot
+    from pipeline_analyzer import get_pipeline_summary
+    from report_generator import (
         generate_full_report,
         store_report,
         store_coverage_snapshot,
@@ -107,15 +107,15 @@ def handle_directive(directive_json):
     if dtype == "full_audit":
         run_full_audit()
     elif dtype == "quality_check":
-        from auditor.quality_analyzer import analyze_confidence_distribution
+        from quality_analyzer import analyze_confidence_distribution
         result = analyze_confidence_distribution()
         print(f"[auditor] Quality check: {result}")
     elif dtype == "coverage_check":
-        from auditor.coverage_analyzer import analyze_coverage
+        from coverage_analyzer import analyze_coverage
         result = analyze_coverage()
         print(f"[auditor] Coverage check: {result.get('total_codes', 0)} codes")
     elif dtype == "pipeline_check":
-        from auditor.pipeline_analyzer import get_pipeline_summary
+        from pipeline_analyzer import get_pipeline_summary
         result = get_pipeline_summary()
         print(f"[auditor] Pipeline check: {result.get('health', 'unknown')}")
     else:

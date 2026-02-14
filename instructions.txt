@@ -226,10 +226,134 @@ Search the knowledge base:
 Look up a DTC code:
   curl http://localhost:8000/dtc/P0301
 
-Connect MCP client to:
-  http://localhost:8002/sse
+11. MCP Server (Model Context Protocol)
 
-11. Backups
+The MCP server exposes the knowledge base to AI tools (Claude Desktop,
+Claude Code, Cursor, custom agents) via the Model Context Protocol.
+
+Server details:
+  Transport:  SSE (Server-Sent Events)
+  SSE URL:    http://localhost:8002/sse
+  Messages:   http://localhost:8002/messages/
+  Health:     http://localhost:8002/health
+
+Available tools:
+  lookup_dtc         Look up a DTC code with causes, steps, sensors, TSBs
+  search_knowledge   Semantic vector search across the knowledge base
+  list_dtc_codes     List/filter DTC codes by category and confidence
+  get_system_stats   Knowledge base coverage and quality metrics
+
+--- Claude Desktop ---
+
+Edit ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)
+  or %APPDATA%\Claude\claude_desktop_config.json (Windows):
+
+  {
+    "mcpServers": {
+      "automotive-kb": {
+        "transport": {
+          "type": "sse",
+          "url": "http://YOUR_SERVER_IP:8002/sse"
+        }
+      }
+    }
+  }
+
+Replace YOUR_SERVER_IP with your P340's IP address (or localhost if running
+on the same machine). Restart Claude Desktop after saving.
+
+--- Claude Code (CLI) ---
+
+Add to your project's .mcp.json file:
+
+  {
+    "mcpServers": {
+      "automotive-kb": {
+        "type": "sse",
+        "url": "http://YOUR_SERVER_IP:8002/sse"
+      }
+    }
+  }
+
+Or add globally via:
+  claude mcp add automotive-kb --transport sse http://YOUR_SERVER_IP:8002/sse
+
+--- Cursor ---
+
+Add to .cursor/mcp.json in your project root:
+
+  {
+    "mcpServers": {
+      "automotive-kb": {
+        "transport": "sse",
+        "url": "http://YOUR_SERVER_IP:8002/sse"
+      }
+    }
+  }
+
+--- Python client (programmatic access) ---
+
+  pip install mcp
+
+  import asyncio
+  from mcp.client.session import ClientSession
+  from mcp.client.sse import sse_client
+
+  async def main():
+      async with sse_client("http://localhost:8002/sse") as (read, write):
+          async with ClientSession(read, write) as session:
+              await session.initialize()
+
+              # List available tools
+              tools = await session.list_tools()
+              print([t.name for t in tools.tools])
+
+              # Look up a DTC code
+              result = await session.call_tool("lookup_dtc", {"code": "P0301"})
+              print(result.content[0].text)
+
+              # Semantic search
+              result = await session.call_tool("search_knowledge", {
+                  "query": "engine misfire causes",
+                  "limit": 5,
+                  "min_trust": 0.3
+              })
+              print(result.content[0].text)
+
+              # List all powertrain codes
+              result = await session.call_tool("list_dtc_codes", {
+                  "category": "Powertrain",
+                  "min_confidence": 0.5,
+                  "limit": 20
+              })
+              print(result.content[0].text)
+
+              # Get system stats
+              result = await session.call_tool("get_system_stats", {})
+              print(result.content[0].text)
+
+  asyncio.run(main())
+
+--- Testing the connection ---
+
+Verify the server is running:
+  curl http://localhost:8002/health
+
+Test SSE stream (should see an endpoint event):
+  curl -N http://localhost:8002/sse
+
+--- Network access ---
+
+The MCP server listens on port 8002. To access from other machines on
+your network, ensure port 8002 is open and use the server's LAN IP.
+
+Find your server IP:
+  hostname -I | awk '{print $1}'
+
+For remote access over the internet, set up a reverse proxy (nginx/caddy)
+with TLS, or use a tunnel (cloudflared, tailscale).
+
+12. Backups
 
 Backup Postgres:
   docker exec refinery_postgres pg_dump -U refinery refinery > backup.sql
@@ -239,7 +363,7 @@ Restore:
 
 MinIO data is in the minio_data Docker volume.
 
-12. Troubleshooting
+13. Troubleshooting
 
 View logs for any service:
   docker compose logs -f orchestrator

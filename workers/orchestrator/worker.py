@@ -26,9 +26,9 @@ _cycle_number = 0
 
 def observe():
     """Phase 1: Collect system state, task statuses, and latest intel."""
-    from orchestrator.resource_monitor import get_system_state
-    from orchestrator.task_manager import get_task_counts, get_active_tasks, get_pending_tasks
-    from orchestrator.planner import get_latest_audit_report
+    from resource_monitor import get_system_state
+    from task_manager import get_task_counts, get_active_tasks, get_pending_tasks
+    from planner import get_latest_audit_report
 
     state = get_system_state()
     task_counts = get_task_counts()
@@ -66,7 +66,7 @@ def orient(observation):
 
 def decide(situation, observation):
     """Phase 3: Determine actions based on situation assessment."""
-    from orchestrator.planner import decide_next_actions
+    from planner import decide_next_actions
 
     actions = decide_next_actions(
         observation["system_state"],
@@ -82,7 +82,7 @@ def decide(situation, observation):
 
 def act(actions, observation):
     """Phase 4: Execute decided actions."""
-    from orchestrator.task_manager import (
+    from task_manager import (
         create_task, has_pending_task_of_type, start_task,
         TASK_RESEARCH, TASK_AUDIT,
     )
@@ -155,11 +155,13 @@ def act(actions, observation):
 
 def process_commands():
     """Check for and process any incoming commands from other agents or API."""
-    from orchestrator.task_manager import complete_task
+    from task_manager import complete_task
 
+    r = get_redis()
     processed = 0
     while processed < 10:  # Max 10 commands per cycle
-        cmd_json = pop_job(COMMAND_QUEUE, timeout=0)
+        # Use rpop (non-blocking) instead of brpop to avoid blocking forever
+        cmd_json = r.rpop(COMMAND_QUEUE)
         if not cmd_json:
             break
 
