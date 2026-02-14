@@ -200,3 +200,112 @@ CREATE INDEX IF NOT EXISTS idx_healing_log_created
 
 CREATE INDEX IF NOT EXISTS idx_healing_log_component
     ON research.healing_log(component, created_at DESC);
+
+-- ==========================================================
+-- ORCHESTRATION SCHEMA (Autonomous Management Layer)
+-- ==========================================================
+
+-- Task management for orchestrator
+CREATE TABLE IF NOT EXISTS research.orchestrator_tasks (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    task_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    priority INT NOT NULL DEFAULT 5,
+    payload JSONB DEFAULT '{}',
+    result JSONB,
+    assigned_to TEXT,
+    error_message TEXT,
+    retry_count INT DEFAULT 0,
+    scheduled_after TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_orch_tasks_status
+    ON research.orchestrator_tasks(status);
+CREATE INDEX IF NOT EXISTS idx_orch_tasks_priority
+    ON research.orchestrator_tasks(priority, created_at);
+CREATE INDEX IF NOT EXISTS idx_orch_tasks_type
+    ON research.orchestrator_tasks(task_type);
+
+-- Orchestrator audit trail
+CREATE TABLE IF NOT EXISTS research.orchestrator_log (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    cycle_number INT NOT NULL,
+    action TEXT NOT NULL,
+    details JSONB DEFAULT '{}',
+    system_state JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_orch_log_cycle
+    ON research.orchestrator_log(cycle_number DESC);
+CREATE INDEX IF NOT EXISTS idx_orch_log_created
+    ON research.orchestrator_log(created_at DESC);
+
+-- Domain/source tracking for researcher
+CREATE TABLE IF NOT EXISTS research.research_sources (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    domain TEXT NOT NULL,
+    url_pattern TEXT,
+    source_type TEXT DEFAULT 'template',
+    quality_tier INT DEFAULT 3 CHECK (quality_tier >= 1 AND quality_tier <= 5),
+    last_crawled_at TIMESTAMP WITH TIME ZONE,
+    total_urls_crawled INT DEFAULT 0,
+    avg_trust_score FLOAT DEFAULT 0.0,
+    is_blocked BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(domain)
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_sources_domain
+    ON research.research_sources(domain);
+
+-- Research planning
+CREATE TABLE IF NOT EXISTS research.research_plans (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    plan_type TEXT NOT NULL,
+    target_dtc_codes TEXT[],
+    target_topic TEXT,
+    priority INT DEFAULT 5,
+    status TEXT NOT NULL DEFAULT 'pending',
+    urls_submitted INT DEFAULT 0,
+    urls_successful INT DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_plans_status
+    ON research.research_plans(status);
+
+-- Audit reports
+CREATE TABLE IF NOT EXISTS research.audit_reports (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    report_type TEXT NOT NULL,
+    summary TEXT,
+    metrics JSONB DEFAULT '{}',
+    recommendations JSONB DEFAULT '[]',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_reports_type
+    ON research.audit_reports(report_type);
+CREATE INDEX IF NOT EXISTS idx_audit_reports_created
+    ON research.audit_reports(created_at DESC);
+
+-- Coverage tracking snapshots
+CREATE TABLE IF NOT EXISTS research.coverage_snapshots (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    snapshot_date DATE NOT NULL,
+    total_dtc_codes INT DEFAULT 0,
+    by_category JSONB DEFAULT '{}',
+    by_confidence_tier JSONB DEFAULT '{}',
+    gap_ranges JSONB DEFAULT '[]',
+    completeness_score FLOAT DEFAULT 0.0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(snapshot_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_coverage_date
+    ON research.coverage_snapshots(snapshot_date DESC);

@@ -368,6 +368,105 @@ services:
     networks:
       - refinery
 
+  # ----------------------------------------------------------
+  # AUTONOMOUS ORCHESTRATION
+  # ----------------------------------------------------------
+  auditor:
+    build:
+      context: ./workers
+      dockerfile: auditor/Dockerfile
+    container_name: refinery_auditor
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      AUDIT_INTERVAL: "1800"
+    networks:
+      - refinery
+
+  orchestrator:
+    build:
+      context: ./workers
+      dockerfile: orchestrator/Dockerfile
+    container_name: refinery_orchestrator
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OLLAMA_BASE_URL: "http://llm-reason:11434"
+      REASONING_MODEL: llama3
+      ORCHESTRATOR_CYCLE: "60"
+      ORCHESTRATOR_AUTO_RESEARCH: "true"
+      MAX_GPU_QUEUE_ITEMS: "20"
+      MAX_CONCURRENT_CRAWLS: "5"
+    networks:
+      - refinery
+
+  researcher:
+    build:
+      context: ./workers
+      dockerfile: researcher/Dockerfile
+    container_name: refinery_researcher
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OLLAMA_BASE_URL: "http://llm-reason:11434"
+      REASONING_MODEL: llama3
+      MAX_URLS_PER_HOUR: "30"
+      MAX_PER_DOMAIN_PER_HOUR: "5"
+      RESEARCH_COOLDOWN: "30"
+    networks:
+      - refinery
+
+  mcp-server:
+    build:
+      context: ./workers
+      dockerfile: mcp-server/Dockerfile
+    container_name: refinery_mcp_server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm-embed:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://refinery:refinery@postgres:5432/refinery"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OLLAMA_BASE_URL: "http://llm-embed:11434"
+      EMBEDDING_MODEL: nomic-embed-text
+    ports:
+      - "8002:8002"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - refinery
+
 networks:
   refinery:
     driver: bridge

@@ -11,7 +11,7 @@ from minio import Minio
 
 from app.config import Config
 from app.models import HealthResponse
-from app.routes import ingest, search, documents, dtc, crawl, stats
+from app.routes import ingest, search, documents, dtc, crawl, stats, orchestration
 
 app = FastAPI(
     title="AI Research Refinery v2",
@@ -34,6 +34,7 @@ app.include_router(documents.router, tags=["Documents"])
 app.include_router(dtc.router, tags=["DTC Codes"])
 app.include_router(crawl.router, tags=["Crawler"])
 app.include_router(stats.router, tags=["Statistics"])
+app.include_router(orchestration.router, tags=["Orchestration"])
 
 
 @app.get("/health", response_model=HealthResponse)
