@@ -618,3 +618,37 @@ CREATE INDEX IF NOT EXISTS idx_vehicle_tsb_vehicle
     ON vehicle.vehicle_tsb_references(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_vehicle_tsb_tsb
     ON vehicle.vehicle_tsb_references(tsb_id);
+
+-- ==========================================================
+-- VERIFICATION SCHEMA ADDITIONS
+-- ==========================================================
+
+ALTER TABLE refined.dtc_codes
+    ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP WITH TIME ZONE,
+    ADD COLUMN IF NOT EXISTS verification_status TEXT DEFAULT 'unverified',
+    ADD COLUMN IF NOT EXISTS verification_model TEXT,
+    ADD COLUMN IF NOT EXISTS pre_verification_confidence FLOAT;
+
+CREATE INDEX IF NOT EXISTS idx_dtc_verified
+    ON refined.dtc_codes(verified_at NULLS FIRST);
+CREATE INDEX IF NOT EXISTS idx_dtc_verification_status
+    ON refined.dtc_codes(verification_status);
+
+CREATE TABLE IF NOT EXISTS refined.verification_results (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    dtc_id UUID NOT NULL REFERENCES refined.dtc_codes(id) ON DELETE CASCADE,
+    field_verified TEXT NOT NULL,
+    original_value TEXT,
+    verification_result TEXT NOT NULL,
+    openai_response TEXT,
+    confidence_adjustment FLOAT DEFAULT 0.0,
+    model_used TEXT NOT NULL,
+    api_key_id TEXT,
+    tokens_used INT DEFAULT 0,
+    verified_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_dtc
+    ON refined.verification_results(dtc_id);
+CREATE INDEX IF NOT EXISTS idx_verification_result
+    ON refined.verification_results(verification_result);

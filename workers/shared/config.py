@@ -18,7 +18,7 @@ class Config:
 
     OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://llm-embed:11434")
     EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "nomic-embed-text")
-    REASONING_MODEL = os.environ.get("REASONING_MODEL", "llama3")
+    REASONING_MODEL = os.environ.get("REASONING_MODEL", "mistral")
 
     WORKER_QUEUE = os.environ.get("WORKER_QUEUE", "jobs:default")
     NEXT_QUEUE = os.environ.get("NEXT_QUEUE", "")

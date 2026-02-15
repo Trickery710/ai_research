@@ -1,10 +1,16 @@
-"""Generates URLs for DTC code research from templates and LLM suggestions."""
+"""Generates URLs for DTC code research from templates, SearXNG, and LLM suggestions.
+
+URL generation tiers (in priority order):
+    Tier 0: SearXNG real web search (highest quality, real URLs)
+    Tier 1: Deterministic URL templates (fast, reliable domains)
+    Tier 2: LLM-suggested URLs (creative but may hallucinate)
+"""
 import json
 import os
 from shared.ollama_client import generate_completion
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://llm-reason:11434")
-REASONING_MODEL = os.environ.get("REASONING_MODEL", "llama3")
+REASONING_MODEL = os.environ.get("REASONING_MODEL", "mistral")
 
 # Tier 1: Deterministic URL templates (no LLM needed)
 URL_TEMPLATES = [
@@ -87,6 +93,36 @@ Respond with ONLY a JSON object:
         return []
 
 
+def generate_searxng_urls(dtc_code, missing_attributes=None):
+    """Tier 0: Get real URLs from SearXNG web search.
+
+    Args:
+        dtc_code: DTC code string.
+        missing_attributes: Optional list of missing data types to focus search.
+
+    Returns:
+        List of URL strings from search results.
+    """
+    from searxng_client import search_dtc
+
+    urls = search_dtc(dtc_code)
+
+    # If specific attributes are missing, do focused searches too
+    if missing_attributes:
+        for attr in missing_attributes[:2]:
+            focused = search_dtc(dtc_code, focus=attr)
+            urls.extend(focused)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            unique.append(u)
+    return unique
+
+
 def generate_range_urls(prefix, start, end):
     """Generate template URLs for a range of DTC codes.
 
@@ -106,12 +142,19 @@ def generate_range_urls(prefix, start, end):
     return results
 
 
-def generate_urls_for_codes(codes, use_llm=False, missing_map=None):
+def generate_urls_for_codes(codes, use_llm=False, use_searxng=False,
+                            missing_map=None):
     """Generate URLs for a list of specific DTC codes.
+
+    URL generation tiers (in priority order):
+        Tier 0: SearXNG real web search (use_searxng=True)
+        Tier 1: Deterministic URL templates (always)
+        Tier 2: LLM-suggested URLs (use_llm=True)
 
     Args:
         codes: List of DTC code strings.
         use_llm: Whether to also use LLM for URL suggestions.
+        use_searxng: Whether to use SearXNG for real web search.
         missing_map: Optional dict mapping code -> list of missing attributes.
 
     Returns:
@@ -119,8 +162,18 @@ def generate_urls_for_codes(codes, use_llm=False, missing_map=None):
     """
     results = []
     for code in codes:
-        urls = generate_template_urls(code)
+        urls = []
 
+        # Tier 0: Real search
+        if use_searxng:
+            missing = missing_map.get(code) if missing_map else None
+            searxng_urls = generate_searxng_urls(code, missing_attributes=missing)
+            urls.extend(searxng_urls)
+
+        # Tier 1: Templates
+        urls.extend(generate_template_urls(code))
+
+        # Tier 2: LLM suggestions
         if use_llm:
             missing = missing_map.get(code) if missing_map else None
             llm_urls = generate_llm_urls(code, missing_attributes=missing)

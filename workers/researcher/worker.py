@@ -1,7 +1,11 @@
 """Researcher worker: discovers and submits new automotive diagnostic URLs.
 
-Listens on orchestrator:research queue for directives and submits
-validated URLs to the crawl pipeline.
+Operates in two modes:
+  1. Directive mode: Listens for orchestrator directives (takes priority)
+  2. Autonomous mode: Continuously fills knowledge gaps using SearXNG + templates
+
+When idle (no directives), the autonomous loop identifies gaps in the database
+and searches for URLs to fill them.
 """
 import sys
 import os
@@ -29,6 +33,13 @@ RATE_LIMIT_KEY = "researcher:rate:total"
 DOMAIN_RATE_PREFIX = "researcher:rate:domain:"
 
 _last_submission = 0
+
+# Autonomous research mode
+AUTONOMOUS_MODE = os.environ.get("AUTONOMOUS_MODE", "true").lower() == "true"
+AUTONOMOUS_INTERVAL = int(os.environ.get("AUTONOMOUS_INTERVAL", 60))
+AUTONOMOUS_URLS_PER_CYCLE = int(os.environ.get("AUTONOMOUS_URLS_PER_CYCLE", 4))
+
+_last_autonomous_cycle = 0
 
 
 def check_rate_limit(domain=None):
@@ -167,7 +178,8 @@ def handle_research_directive(directive_json):
     # Process target codes
     if target_codes:
         use_llm = dtype in ("improve_confidence", "fill_gaps")
-        code_urls = generate_urls_for_codes(target_codes, use_llm=use_llm)
+        code_urls = generate_urls_for_codes(
+            target_codes, use_llm=use_llm, use_searxng=True)
 
         for code, urls in code_urls:
             for url in urls:
@@ -239,21 +251,112 @@ def handle_research_directive(directive_json):
         )
 
 
+def run_autonomous_cycle():
+    """One cycle of autonomous gap-filling research.
+
+    Asks the reasoning LLM to look at the database state and decide what
+    search queries to run. Then executes those queries via SearXNG and
+    submits discovered URLs to the crawl pipeline.
+    """
+    global _last_autonomous_cycle
+
+    from gap_analyzer import get_research_plan
+    from url_evaluator import validate_url
+
+    # Ask the LLM what to research
+    searches = get_research_plan()
+    if not searches:
+        _last_autonomous_cycle = time.time()
+        print("[researcher] Autonomous cycle: LLM returned no searches")
+        return
+
+    submitted = 0
+    queries_run = 0
+
+    for search in searches:
+        if submitted >= AUTONOMOUS_URLS_PER_CYCLE:
+            break
+
+        query = search.get("query", "")
+        reason = search.get("reason", "")
+        if not query:
+            continue
+
+        print(f"[researcher] Searching: {query} ({reason})")
+
+        # Run the LLM-crafted query through SearXNG
+        try:
+            from searxng_client import SEARXNG_BASE_URL, SEARXNG_TIMEOUT
+            import requests as _requests
+            resp = _requests.get(
+                f"{SEARXNG_BASE_URL}/search",
+                params={"q": query, "format": "json", "language": "en"},
+                timeout=SEARXNG_TIMEOUT,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            urls = [r["url"] for r in data.get("results", [])[:10]
+                    if r.get("url", "").startswith("http")]
+        except Exception as e:
+            print(f"[researcher] SearXNG error for '{query}': {e}")
+            urls = []
+
+        queries_run += 1
+
+        for url in urls:
+            if submitted >= AUTONOMOUS_URLS_PER_CYCLE:
+                break
+            is_valid, _ = validate_url(url)
+            if is_valid:
+                result = submit_url(url)
+                if result:
+                    submitted += 1
+                    time.sleep(COOLDOWN_SECONDS)
+
+    _last_autonomous_cycle = time.time()
+    print(f"[researcher] Autonomous cycle: {queries_run} queries, "
+          f"{submitted} URLs submitted")
+
+    # Report autonomous activity to orchestrator
+    push_job(COMMAND_QUEUE, json.dumps({
+        "source": "researcher",
+        "type": "autonomous_cycle",
+        "result": {
+            "urls_submitted": submitted,
+            "queries_run": queries_run,
+            "searches_planned": len(searches),
+        },
+    }))
+
+
 def main():
     from source_registry import init_default_sources
 
     print(f"[researcher] Worker started. Queue={RESEARCH_QUEUE}")
+    print(f"[researcher] Autonomous={AUTONOMOUS_MODE}, "
+          f"interval={AUTONOMOUS_INTERVAL}s, "
+          f"urls/cycle={AUTONOMOUS_URLS_PER_CYCLE}")
     print(f"[researcher] Rate limits: {MAX_URLS_PER_HOUR}/hr total, "
           f"{MAX_PER_DOMAIN_PER_HOUR}/domain/hr, {COOLDOWN_SECONDS}s cooldown")
 
-    # Initialize default sources
     init_default_sources()
 
     while True:
         try:
-            directive = pop_job(RESEARCH_QUEUE, timeout=Config.POLL_TIMEOUT)
+            # Check for orchestrator directives (short timeout)
+            directive = pop_job(RESEARCH_QUEUE, timeout=2)
             if directive:
                 handle_research_directive(directive)
+                continue  # Directives take priority
+
+            # Autonomous mode: fill gaps when idle
+            if AUTONOMOUS_MODE:
+                elapsed = time.time() - _last_autonomous_cycle
+                if elapsed >= AUTONOMOUS_INTERVAL:
+                    allowed, _ = check_rate_limit()
+                    if allowed:
+                        run_autonomous_cycle()
+
         except Exception as e:
             print(f"[researcher] ERROR: {e}")
             traceback.print_exc()

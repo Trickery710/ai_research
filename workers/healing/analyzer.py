@@ -98,7 +98,7 @@ Analyze this alert and propose the best remediation action.
             system_prompt=SYSTEM_PROMPT,
             format_json=True,
             temperature=0.1,  # Low temperature for deterministic, conservative decisions
-            model=os.environ.get("REASONING_MODEL", "llama3")
+            model=os.environ.get("REASONING_MODEL", "mistral")
         )
 
         result = parse_llm_response(response_text)

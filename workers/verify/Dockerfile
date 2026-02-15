@@ -1,7 +1,6 @@
-# Optimized build for researcher worker
+# Verification worker - cross-verifies DTC data via OpenAI
 FROM python:3.11-slim-bookworm
 
-# Set Python environment variables to optimize runtime
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -13,19 +12,12 @@ WORKDIR /app
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Install dependencies
-COPY researcher/requirements.txt .
+COPY verify/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy shared modules
+# Copy shared modules and worker code
 COPY shared/ ./shared/
-
-# Copy researcher modules
-COPY researcher/worker.py .
-COPY researcher/query_generator.py .
-COPY researcher/url_evaluator.py .
-COPY researcher/source_registry.py .
-COPY researcher/searxng_client.py .
-COPY researcher/gap_analyzer.py .
+COPY verify/worker.py .
 
 # Remove any Python cache files
 RUN find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \

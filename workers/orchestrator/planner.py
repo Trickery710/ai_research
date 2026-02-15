@@ -8,7 +8,7 @@ from shared.db import execute_query, execute_query_one
 from shared.ollama_client import generate_completion
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://llm-reason:11434")
-REASONING_MODEL = os.environ.get("REASONING_MODEL", "llama3")
+REASONING_MODEL = os.environ.get("REASONING_MODEL", "mistral")
 
 
 def get_latest_audit_report():

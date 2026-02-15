@@ -66,11 +66,31 @@ services:
     networks:
       - refinery
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: refinery_searxng
+    restart: unless-stopped
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_BASE_URL: "http://searxng:8080/"
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - refinery
+
   # ----------------------------------------------------------
   # LLM SERVICES (GPU-accelerated Ollama instances)
-  # GPU assignment is controlled via .env file:
-  #   Single GPU (default):  GPU_EMBED=all, GPU_REASON=all (shared)
-  #   Dual GPU (production): GPU_EMBED=0,   GPU_REASON=1   (isolated)
+  # GPU assignment via device_ids ensures each container only
+  # sees its assigned GPU. Set in .env:
+  #   GPU_EMBED=0  (Quadro P1000 4GB - nomic-embed-text)
+  #   GPU_REASON=1 (RTX 3080 10GB   - mistral reasoning + reason2)
   # ----------------------------------------------------------
   llm-embed:
     image: ollama/ollama
@@ -82,13 +102,12 @@ services:
       - ollama_embed_data:/root/.ollama
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
-      NVIDIA_VISIBLE_DEVICES: ${GPU_EMBED:-all}
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              device_ids: ["${GPU_EMBED:-0}"]
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "ollama", "list"]
@@ -109,13 +128,12 @@ services:
       - ollama_reason_data:/root/.ollama
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
-      NVIDIA_VISIBLE_DEVICES: ${GPU_REASON:-all}
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              device_ids: ["${GPU_REASON:-0}"]
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "ollama", "list"]
@@ -126,8 +144,8 @@ services:
     networks:
       - refinery
 
-  # Second reasoning instance on GPU 0 (alongside embeddings)
-  # The 3080 has 10GB - embeddings use ~274MB, leaving ~9.7GB for reasoning
+  # Second reasoning instance on RTX 3080 (alongside primary reasoning)
+  # Both reason + reason2 share the 3080's 10GB VRAM
   llm-reason2:
     image: ollama/ollama
     container_name: refinery_llm_reason2
@@ -136,13 +154,12 @@ services:
       - ollama_reason2_data:/root/.ollama
     environment:
       OLLAMA_HOST: "0.0.0.0:11434"
-      NVIDIA_VISIBLE_DEVICES: ${GPU_EMBED:-all}
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              device_ids: ["${GPU_REASON:-1}"]
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "ollama", "list"]
@@ -264,7 +281,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: llama3.1
+      REASONING_MODEL: mistral
       WORKER_QUEUE: "jobs:evaluate"
       NEXT_QUEUE: "jobs:extract"
     networks:
@@ -289,7 +306,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: llama3.1.1
+      REASONING_MODEL: mistral
       WORKER_QUEUE: "jobs:extract"
       NEXT_QUEUE: "jobs:resolve"
     networks:
@@ -340,6 +357,29 @@ services:
       MINIO_BUCKET: documents
       WORKER_QUEUE: "jobs:crawl"
       NEXT_QUEUE: "jobs:chunk"
+    networks:
+      - refinery
+
+  worker-verify:
+    build:
+      context: ./workers
+      dockerfile: verify/Dockerfile
+    container_name: refinery_worker_verify
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      OPENAI_API_KEYS: ${OPENAI_API_KEYS:-}
+      VERIFY_MODEL: ${VERIFY_MODEL:-gpt-4o-mini}
+      VERIFY_INTERVAL: "30"
+      VERIFY_BATCH_SIZE: "5"
     networks:
       - refinery
 
@@ -401,7 +441,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: llama3.1
+      REASONING_MODEL: mistral
       AUTO_FIX_ENABLED: "true"
       AUTO_FIX_ALLOW: "restart_worker,requeue_documents,clear_stale_locks"
       AUTO_FIX_DENY: "restart_container,database_operations,delete_data"
@@ -455,7 +495,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: llama3.1
+      REASONING_MODEL: mistral
       ORCHESTRATOR_CYCLE: ${ORCHESTRATOR_CYCLE:-60}
       ORCHESTRATOR_AUTO_RESEARCH: ${ORCHESTRATOR_AUTO_RESEARCH:-true}
       MAX_GPU_QUEUE_ITEMS: "20"
@@ -474,6 +514,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      searxng:
+        condition: service_healthy
     environment:
       PYTHONUNBUFFERED: "1"
       DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
@@ -481,10 +523,14 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: llama3.1
-      MAX_URLS_PER_HOUR: ${MAX_URLS_PER_HOUR:-30}
+      REASONING_MODEL: mistral
+      SEARXNG_URL: "http://searxng:8080"
+      AUTONOMOUS_MODE: ${AUTONOMOUS_MODE:-true}
+      AUTONOMOUS_INTERVAL: "60"
+      AUTONOMOUS_URLS_PER_CYCLE: "4"
+      MAX_URLS_PER_HOUR: ${MAX_URLS_PER_HOUR:-60}
       MAX_PER_DOMAIN_PER_HOUR: ${MAX_PER_DOMAIN_PER_HOUR:-5}
-      RESEARCH_COOLDOWN: "30"
+      RESEARCH_COOLDOWN: "15"
     networks:
       - refinery
 
