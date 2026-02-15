@@ -66,7 +66,7 @@ def extract_text_from_pdf(pdf_bytes):
     Returns:
         tuple: (text_string, title_string)
     """
-    from PyPDF2 import PdfReader
+    from pypdf import PdfReader
     reader = PdfReader(BytesIO(pdf_bytes))
     pages = []
     for page in reader.pages:
