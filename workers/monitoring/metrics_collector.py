@@ -102,15 +102,15 @@ def collect_stage_timings() -> dict:
 
         timings = {}
         for row in recent_rows:
-            stage = row['stage']
-            timings[stage] = {'recent_avg_ms': float(row['avg_ms']) if row['avg_ms'] else 0}
+            stage = row[0]
+            timings[stage] = {'recent_avg_ms': float(row[1]) if row[1] else 0}
 
         for row in historical_rows:
-            stage = row['stage']
+            stage = row[0]
             if stage in timings:
-                timings[stage]['historical_avg_ms'] = float(row['avg_ms']) if row['avg_ms'] else 0
+                timings[stage]['historical_avg_ms'] = float(row[1]) if row[1] else 0
             else:
-                timings[stage] = {'historical_avg_ms': float(row['avg_ms']) if row['avg_ms'] else 0}
+                timings[stage] = {'historical_avg_ms': float(row[1]) if row[1] else 0}
 
         return timings
     except Exception as e:

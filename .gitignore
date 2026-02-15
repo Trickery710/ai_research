@@ -37,6 +37,13 @@ Thumbs.db
 # Docker
 *.log
 
+# Database data (Docker volumes)
+postgres_data/
+minio_data/
+ollama_embed_data/
+ollama_reason_data/
+ollama_reason2_data/
+
 # Backups
 *.sql.bak
 backup*.sql

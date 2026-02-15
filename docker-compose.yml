@@ -126,6 +126,33 @@ services:
     networks:
       - refinery
 
+  # Second reasoning instance on GPU 0 (alongside embeddings)
+  # The 3080 has 10GB - embeddings use ~274MB, leaving ~9.7GB for reasoning
+  llm-reason2:
+    image: ollama/ollama
+    container_name: refinery_llm_reason2
+    restart: unless-stopped
+    volumes:
+      - ollama_reason2_data:/root/.ollama
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      NVIDIA_VISIBLE_DEVICES: ${GPU_EMBED:-all}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - refinery
+
   # ----------------------------------------------------------
   # BACKEND API
   # ----------------------------------------------------------
@@ -237,7 +264,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: llama3
+      REASONING_MODEL: llama3.1
       WORKER_QUEUE: "jobs:evaluate"
       NEXT_QUEUE: "jobs:extract"
     networks:
@@ -262,7 +289,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: llama3
+      REASONING_MODEL: llama3.1.1
       WORKER_QUEUE: "jobs:extract"
       NEXT_QUEUE: "jobs:resolve"
     networks:
@@ -374,7 +401,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: llama3
+      REASONING_MODEL: llama3.1
       AUTO_FIX_ENABLED: "true"
       AUTO_FIX_ALLOW: "restart_worker,requeue_documents,clear_stale_locks"
       AUTO_FIX_DENY: "restart_container,database_operations,delete_data"
@@ -428,7 +455,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: llama3
+      REASONING_MODEL: llama3.1
       ORCHESTRATOR_CYCLE: ${ORCHESTRATOR_CYCLE:-60}
       ORCHESTRATOR_AUTO_RESEARCH: ${ORCHESTRATOR_AUTO_RESEARCH:-true}
       MAX_GPU_QUEUE_ITEMS: "20"
@@ -454,7 +481,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: llama3
+      REASONING_MODEL: llama3.1
       MAX_URLS_PER_HOUR: ${MAX_URLS_PER_HOUR:-30}
       MAX_PER_DOMAIN_PER_HOUR: ${MAX_PER_DOMAIN_PER_HOUR:-5}
       RESEARCH_COOLDOWN: "30"
@@ -502,3 +529,4 @@ volumes:
   minio_data:
   ollama_embed_data:
   ollama_reason_data:
+  ollama_reason2_data:

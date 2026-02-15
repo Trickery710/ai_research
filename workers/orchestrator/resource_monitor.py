@@ -39,8 +39,14 @@ def get_resource_availability():
     gpu_available = gpu_load < MAX_GPU_QUEUE_ITEMS
     crawl_available = crawl_load < MAX_CONCURRENT_CRAWLS
 
+    # GPU 0 (embed) is idle when embed queue is empty - can accept reasoning
+    embed_idle = depths.get("jobs:embed", 0) == 0
+    gpu1_available = gpu_load < MAX_GPU_QUEUE_ITEMS
+    gpu0_burst = embed_idle and gpu_load > 0  # GPU 0 free and work exists
+
     return {
         "gpu_available": gpu_available,
+        "gpu0_burst_available": gpu0_burst,
         "crawl_available": crawl_available,
         "gpu_load": gpu_load,
         "gpu_max": MAX_GPU_QUEUE_ITEMS,

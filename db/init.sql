@@ -309,3 +309,312 @@ CREATE TABLE IF NOT EXISTS research.coverage_snapshots (
 
 CREATE INDEX IF NOT EXISTS idx_coverage_date
     ON research.coverage_snapshots(snapshot_date DESC);
+
+-- ==========================================================
+-- VEHICLE SCHEMA (Automotive Reference Data Layer)
+-- ==========================================================
+CREATE SCHEMA IF NOT EXISTS vehicle;
+
+-- ----------------------------------------------------------
+-- 1. VEHICLE IDENTIFICATION
+-- ----------------------------------------------------------
+
+-- Core vehicle definition: year/make/model/generation/trim
+CREATE TABLE IF NOT EXISTS vehicle.vehicles (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    year INT NOT NULL CHECK (year >= 1886 AND year <= 2100),
+    make TEXT NOT NULL,
+    model TEXT NOT NULL,
+    generation TEXT,
+    trim TEXT,
+    body_style TEXT,
+    drive_type TEXT,
+    production_start DATE,
+    production_end DATE,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicles_unique
+    ON vehicle.vehicles(year, make, model, COALESCE(generation, ''), COALESCE(trim, ''));
+CREATE INDEX IF NOT EXISTS idx_vehicles_make_model
+    ON vehicle.vehicles(make, model);
+CREATE INDEX IF NOT EXISTS idx_vehicles_year
+    ON vehicle.vehicles(year);
+CREATE INDEX IF NOT EXISTS idx_vehicles_make_model_year
+    ON vehicle.vehicles(make, model, year);
+
+-- Equipment / options catalog
+CREATE TABLE IF NOT EXISTS vehicle.equipment_options (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    category TEXT NOT NULL,
+    description TEXT,
+    option_code TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_equipment_unique
+    ON vehicle.equipment_options(name, COALESCE(option_code, ''));
+
+CREATE INDEX IF NOT EXISTS idx_equipment_category
+    ON vehicle.equipment_options(category);
+
+-- Junction: vehicle <-> equipment
+CREATE TABLE IF NOT EXISTS vehicle.vehicle_equipment (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vehicle_id UUID NOT NULL REFERENCES vehicle.vehicles(id) ON DELETE CASCADE,
+    equipment_id UUID NOT NULL REFERENCES vehicle.equipment_options(id) ON DELETE CASCADE,
+    is_standard BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(vehicle_id, equipment_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_equipment_vehicle
+    ON vehicle.vehicle_equipment(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_vehicle_equipment_equipment
+    ON vehicle.vehicle_equipment(equipment_id);
+
+-- VIN position definitions (what each position range encodes)
+CREATE TABLE IF NOT EXISTS vehicle.vin_positions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    position_start INT NOT NULL CHECK (position_start >= 1 AND position_start <= 17),
+    position_end INT NOT NULL CHECK (position_end >= 1 AND position_end <= 17),
+    field_name TEXT NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(position_start, position_end, field_name),
+    CHECK (position_end >= position_start)
+);
+
+-- VIN decode values (character(s) at positions -> meaning)
+CREATE TABLE IF NOT EXISTS vehicle.vin_decode_values (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    position_def_id UUID NOT NULL REFERENCES vehicle.vin_positions(id) ON DELETE CASCADE,
+    vin_characters TEXT NOT NULL,
+    decoded_value TEXT NOT NULL,
+    make TEXT,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vin_decode_unique
+    ON vehicle.vin_decode_values(position_def_id, vin_characters, COALESCE(make, ''));
+
+CREATE INDEX IF NOT EXISTS idx_vin_decode_position
+    ON vehicle.vin_decode_values(position_def_id);
+CREATE INDEX IF NOT EXISTS idx_vin_decode_chars
+    ON vehicle.vin_decode_values(vin_characters);
+CREATE INDEX IF NOT EXISTS idx_vin_decode_make
+    ON vehicle.vin_decode_values(make);
+
+-- ----------------------------------------------------------
+-- 2. POWERTRAIN
+-- ----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS vehicle.engines (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    engine_code TEXT NOT NULL,
+    displacement_liters FLOAT,
+    fuel_type TEXT,
+    cylinders INT,
+    configuration TEXT,
+    aspiration TEXT DEFAULT 'natural',
+    horsepower INT,
+    torque_ft_lbs INT,
+    manufacturer TEXT,
+    vin_identifier TEXT,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(engine_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_engines_code
+    ON vehicle.engines(engine_code);
+CREATE INDEX IF NOT EXISTS idx_engines_fuel_type
+    ON vehicle.engines(fuel_type);
+
+CREATE TABLE IF NOT EXISTS vehicle.transmissions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    transmission_code TEXT NOT NULL,
+    transmission_type TEXT NOT NULL,
+    speeds INT,
+    manufacturer TEXT,
+    vin_identifier TEXT,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(transmission_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transmissions_code
+    ON vehicle.transmissions(transmission_code);
+CREATE INDEX IF NOT EXISTS idx_transmissions_type
+    ON vehicle.transmissions(transmission_type);
+
+-- Junction: vehicle <-> engine (many-to-many)
+CREATE TABLE IF NOT EXISTS vehicle.vehicle_engines (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vehicle_id UUID NOT NULL REFERENCES vehicle.vehicles(id) ON DELETE CASCADE,
+    engine_id UUID NOT NULL REFERENCES vehicle.engines(id) ON DELETE CASCADE,
+    is_standard BOOLEAN DEFAULT TRUE,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(vehicle_id, engine_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_engines_vehicle
+    ON vehicle.vehicle_engines(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_vehicle_engines_engine
+    ON vehicle.vehicle_engines(engine_id);
+
+-- Junction: vehicle <-> transmission (many-to-many)
+CREATE TABLE IF NOT EXISTS vehicle.vehicle_transmissions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vehicle_id UUID NOT NULL REFERENCES vehicle.vehicles(id) ON DELETE CASCADE,
+    transmission_id UUID NOT NULL REFERENCES vehicle.transmissions(id) ON DELETE CASCADE,
+    is_standard BOOLEAN DEFAULT TRUE,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(vehicle_id, transmission_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_trans_vehicle
+    ON vehicle.vehicle_transmissions(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_vehicle_trans_transmission
+    ON vehicle.vehicle_transmissions(transmission_id);
+
+-- ----------------------------------------------------------
+-- 3. SENSOR CATALOG
+-- ----------------------------------------------------------
+
+-- Sensor manufacturers
+CREATE TABLE IF NOT EXISTS vehicle.sensor_manufacturers (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    country TEXT,
+    website TEXT,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(name)
+);
+
+-- Sensor part numbers: per manufacturer, OEM vs aftermarket
+CREATE TABLE IF NOT EXISTS vehicle.sensor_part_numbers (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    sensor_id UUID NOT NULL REFERENCES refined.sensors(id) ON DELETE CASCADE,
+    manufacturer_id UUID NOT NULL REFERENCES vehicle.sensor_manufacturers(id) ON DELETE CASCADE,
+    part_number TEXT NOT NULL,
+    is_oem BOOLEAN DEFAULT FALSE,
+    price_usd NUMERIC(10,2),
+    superseded_by UUID REFERENCES vehicle.sensor_part_numbers(id) ON DELETE SET NULL,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(manufacturer_id, part_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sensor_parts_sensor
+    ON vehicle.sensor_part_numbers(sensor_id);
+CREATE INDEX IF NOT EXISTS idx_sensor_parts_manufacturer
+    ON vehicle.sensor_part_numbers(manufacturer_id);
+CREATE INDEX IF NOT EXISTS idx_sensor_parts_part_number
+    ON vehicle.sensor_part_numbers(part_number);
+CREATE INDEX IF NOT EXISTS idx_sensor_parts_oem
+    ON vehicle.sensor_part_numbers(is_oem);
+
+-- Junction: vehicle <-> sensor with location
+CREATE TABLE IF NOT EXISTS vehicle.vehicle_sensors (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vehicle_id UUID NOT NULL REFERENCES vehicle.vehicles(id) ON DELETE CASCADE,
+    sensor_id UUID NOT NULL REFERENCES refined.sensors(id) ON DELETE CASCADE,
+    location TEXT,
+    quantity INT DEFAULT 1,
+    notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vehicle_sensors_unique
+    ON vehicle.vehicle_sensors(vehicle_id, sensor_id, COALESCE(location, ''));
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_sensors_vehicle
+    ON vehicle.vehicle_sensors(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_vehicle_sensors_sensor
+    ON vehicle.vehicle_sensors(sensor_id);
+
+-- ----------------------------------------------------------
+-- 4. MANUALS / DOCUMENTATION
+-- ----------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS vehicle.documents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vehicle_id UUID REFERENCES vehicle.vehicles(id) ON DELETE SET NULL,
+    document_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    edition TEXT,
+    language TEXT DEFAULT 'en',
+    year INT,
+    page_count INT,
+    mime_type TEXT DEFAULT 'application/pdf',
+    minio_bucket TEXT DEFAULT 'vehicle-documents',
+    minio_key TEXT NOT NULL,
+    file_size_bytes BIGINT,
+    content_hash TEXT,
+    source_url TEXT,
+    metadata JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(content_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_docs_vehicle
+    ON vehicle.documents(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_vehicle_docs_type
+    ON vehicle.documents(document_type);
+CREATE INDEX IF NOT EXISTS idx_vehicle_docs_hash
+    ON vehicle.documents(content_hash);
+CREATE INDEX IF NOT EXISTS idx_vehicle_docs_type_vehicle
+    ON vehicle.documents(document_type, vehicle_id);
+
+-- ----------------------------------------------------------
+-- 5. CROSS-REFERENCES (vehicle <-> refined schema)
+-- ----------------------------------------------------------
+
+-- Link DTC codes to specific vehicles
+CREATE TABLE IF NOT EXISTS vehicle.vehicle_dtc_codes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vehicle_id UUID NOT NULL REFERENCES vehicle.vehicles(id) ON DELETE CASCADE,
+    dtc_id UUID NOT NULL REFERENCES refined.dtc_codes(id) ON DELETE CASCADE,
+    prevalence TEXT,
+    notes TEXT,
+    confidence_score FLOAT DEFAULT 0.5
+        CHECK (confidence_score >= 0 AND confidence_score <= 1),
+    source_chunk_id UUID REFERENCES research.document_chunks(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(vehicle_id, dtc_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_dtc_vehicle
+    ON vehicle.vehicle_dtc_codes(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_vehicle_dtc_dtc
+    ON vehicle.vehicle_dtc_codes(dtc_id);
+
+-- Link TSBs to specific vehicles
+CREATE TABLE IF NOT EXISTS vehicle.vehicle_tsb_references (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    vehicle_id UUID NOT NULL REFERENCES vehicle.vehicles(id) ON DELETE CASCADE,
+    tsb_id UUID NOT NULL REFERENCES refined.tsb_references(id) ON DELETE CASCADE,
+    applicability_notes TEXT,
+    confidence_score FLOAT DEFAULT 0.5
+        CHECK (confidence_score >= 0 AND confidence_score <= 1),
+    source_chunk_id UUID REFERENCES research.document_chunks(id) ON DELETE SET NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(vehicle_id, tsb_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_vehicle_tsb_vehicle
+    ON vehicle.vehicle_tsb_references(vehicle_id);
+CREATE INDEX IF NOT EXISTS idx_vehicle_tsb_tsb
+    ON vehicle.vehicle_tsb_references(tsb_id);
