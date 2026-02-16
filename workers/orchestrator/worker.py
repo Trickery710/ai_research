@@ -262,19 +262,32 @@ def run_cycle():
 
 
 def main():
+    from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+    shutdown = GracefulShutdown()
+
     print(
         f"[orchestrator] Started. Cycle={CYCLE_INTERVAL}s "
         f"AutoResearch={AUTO_RESEARCH}"
     )
 
-    while True:
+    wait_for_db()
+    wait_for_redis()
+
+    while shutdown.is_running():
         try:
             run_cycle()
         except Exception as e:
             print(f"[orchestrator] ERROR in cycle: {e}")
             traceback.print_exc()
 
-        time.sleep(CYCLE_INTERVAL)
+        # Sleep in 1s increments to allow fast shutdown
+        for _ in range(CYCLE_INTERVAL):
+            if not shutdown.is_running():
+                break
+            time.sleep(1)
+
+    shutdown.cleanup()
 
 
 if __name__ == "__main__":

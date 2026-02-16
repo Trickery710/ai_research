@@ -80,6 +80,14 @@ class DTCDetailResponse(DTCResponse):
     diagnostic_steps: List[dict]
     sensors: List[dict]
     tsb_references: List[dict]
+    # New knowledge graph fields (optional for backward compat)
+    oem_variants: Optional[List[dict]] = None
+    verified_fixes: Optional[List[dict]] = None
+    symptoms: Optional[List[dict]] = None
+    related_parts: Optional[List[dict]] = None
+    forum_threads: Optional[List[dict]] = None
+    live_data_parameters: Optional[List[dict]] = None
+    ai_explanation: Optional[dict] = None
 
 
 class CrawlResponse(BaseModel):

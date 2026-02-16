@@ -28,13 +28,13 @@ services:
     container_name: refinery_redis
     restart: unless-stopped
     command: >
-      sh -c "if [ -f /etc/redis/redis.conf ]; then
-        redis-server /etc/redis/redis.conf;
+      sh -c "if [ -f /etc/redis/secrets/redis.conf ]; then
+        redis-server /etc/redis/secrets/redis.conf;
       else
         redis-server;
       fi"
     volumes:
-      - ./secrets/redis.conf:/etc/redis/redis.conf:ro
+      - ./secrets:/etc/redis/secrets:ro
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:
@@ -177,6 +177,7 @@ services:
     build: ./backend
     container_name: refinery_backend
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -216,6 +217,7 @@ services:
       dockerfile: chunking/Dockerfile
     container_name: refinery_worker_chunking
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -243,6 +245,7 @@ services:
       dockerfile: embedding/Dockerfile
     container_name: refinery_worker_embedding
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -268,6 +271,7 @@ services:
       dockerfile: evaluation/Dockerfile
     container_name: refinery_worker_evaluation
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -284,6 +288,8 @@ services:
       REASONING_MODEL: mistral
       WORKER_QUEUE: "jobs:evaluate"
       NEXT_QUEUE: "jobs:extract"
+      SEARXNG_URL: "http://searxng:8080"
+      EVAL_SEARCH_ENABLED: ${EVAL_SEARCH_ENABLED:-true}
     networks:
       - refinery
 
@@ -293,6 +299,7 @@ services:
       dockerfile: extraction/Dockerfile
     container_name: refinery_worker_extraction
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -318,6 +325,7 @@ services:
       dockerfile: conflict/Dockerfile
     container_name: refinery_worker_conflict
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -339,6 +347,7 @@ services:
       dockerfile: crawler/Dockerfile
     container_name: refinery_worker_crawler
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -366,6 +375,7 @@ services:
       dockerfile: verify/Dockerfile
     container_name: refinery_worker_verify
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -392,6 +402,7 @@ services:
       dockerfile: monitoring/Dockerfile
     container_name: refinery_monitor_agent
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -426,6 +437,7 @@ services:
       dockerfile: healing/Dockerfile
     container_name: refinery_healing_agent
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -462,6 +474,7 @@ services:
       dockerfile: auditor/Dockerfile
     container_name: refinery_auditor
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -483,6 +496,7 @@ services:
       dockerfile: orchestrator/Dockerfile
     container_name: refinery_orchestrator
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -509,6 +523,7 @@ services:
       dockerfile: researcher/Dockerfile
     container_name: refinery_researcher
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -540,6 +555,7 @@ services:
       dockerfile: mcp-server/Dockerfile
     container_name: refinery_mcp_server
     restart: unless-stopped
+    stop_grace_period: 10s
     depends_on:
       postgres:
         condition: service_healthy

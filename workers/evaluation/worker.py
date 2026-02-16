@@ -25,7 +25,9 @@ from shared.pipeline import (
 )
 
 SYSTEM_PROMPT = """You are an automotive technical content evaluator.
-You will be given a text chunk from a technical document.
+You will be given a text chunk from a technical document, optionally with
+web search context for cross-referencing.
+
 Evaluate it and respond with ONLY a JSON object (no other text):
 
 {
@@ -35,9 +37,25 @@ Evaluate it and respond with ONLY a JSON object (no other text):
   "reasoning": "<brief explanation>"
 }
 
-Scoring guidelines:
-- trust_score: 1.0 = OEM service manual, 0.8 = professional repair guide, 0.5 = forum post with detail, 0.2 = vague/unverified, 0.0 = spam/irrelevant
-- relevance_score: 1.0 = direct diagnostic procedure, 0.8 = DTC explanation, 0.5 = general automotive, 0.2 = tangentially related, 0.0 = not automotive"""
+Scoring guidelines (use the full 0.0-1.0 range, not just fixed tiers):
+- trust_score: Rate source credibility on a continuous scale.
+  Anchors: ~0.9-1.0 = OEM/factory data, ~0.7-0.85 = professional repair guide or
+  well-sourced technical article, ~0.4-0.65 = forum post with specific details or
+  community-verified info, ~0.2-0.35 = anecdotal or vague claims,
+  ~0.0-0.15 = spam/ads/completely unverifiable.
+  Consider: specificity of claims, presence of part numbers or specs,
+  technical depth, consistency with known automotive principles.
+
+- relevance_score: Rate diagnostic utility on a continuous scale.
+  Anchors: ~0.9-1.0 = step-by-step diagnostic procedure with measurements,
+  ~0.7-0.85 = DTC explanation with causes/symptoms, ~0.5-0.65 = general
+  automotive knowledge applicable to diagnostics, ~0.25-0.4 = tangentially
+  related automotive content, ~0.0-0.2 = not automotive or not useful.
+  Consider: actionability, presence of DTC codes, diagnostic value,
+  completeness of information.
+
+If web search context is provided, use it to validate claims and adjust
+scores accordingly. Corroborated information should score higher."""
 
 VALID_DOMAINS = frozenset([
     "obd", "electrical", "engine", "transmission", "brakes",
@@ -113,11 +131,27 @@ def process_document(doc_id):
     if not chunks:
         raise ValueError(f"No chunks found for document {doc_id}")
 
+    # Import SearxNG search integration
+    try:
+        from searxng_verify import get_search_context_for_chunk
+        search_available = True
+    except ImportError:
+        search_available = False
+
     evaluated_count = 0
     for chunk_id, content in chunks:
+        # Build search context if available
+        search_context = ""
+        if search_available:
+            try:
+                search_context = get_search_context_for_chunk(content)
+            except Exception:
+                pass  # search is best-effort
+
         prompt = (
             f"Evaluate this automotive technical content chunk:\n\n"
             f"---\n{content}\n---"
+            f"{search_context}"
         )
         response_text = generate_completion(
             prompt=prompt,
@@ -169,12 +203,19 @@ def process_document(doc_id):
 
 
 def main():
+    from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+    shutdown = GracefulShutdown()
+
     print(f"[evaluation] Worker started. Queue={Config.WORKER_QUEUE} "
           f"Ollama={Config.OLLAMA_BASE_URL} Model={Config.REASONING_MODEL}")
 
+    wait_for_db()
+    wait_for_redis()
+
     ensure_model_available(Config.REASONING_MODEL)
 
-    while True:
+    while shutdown.is_running():
         try:
             job = pop_job(Config.WORKER_QUEUE, timeout=Config.POLL_TIMEOUT)
             if job:
@@ -190,6 +231,8 @@ def main():
             except Exception:
                 pass
         time.sleep(0.1)
+
+    shutdown.cleanup()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,245 @@
+version: 1
+project: ai_research_refinery
+defaults:
+  log_caps:
+    max_log_lines: 200
+    max_stack_frames: 20
+  file_caps:
+    max_files_opened: 8
+    max_file_lines_per_file: 350
+  output_caps:
+    max_response_tokens: 900
+  safety:
+    forbid_destructive_commands:
+      - "rm -rf"
+      - "docker system prune"
+      - "docker volume rm"
+      - "docker network rm"
+      - "DROP DATABASE"
+      - "TRUNCATE"
+
+# All services in docker-compose.yml:
+#   Infrastructure: postgres, redis, minio, searxng
+#   LLM: llm-embed, llm-reason, llm-reason2
+#   Backend: backend
+#   Workers: worker-crawler, worker-chunking, worker-embedding, worker-evaluation,
+#            worker-extraction, worker-conflict, worker-verify
+#   Monitoring: monitor-agent, healing-agent
+#   Autonomous: orchestrator, researcher, auditor
+#   API: mcp-server
+
+# Host endpoints:
+#   backend:       http://localhost:8000/health
+#   monitor-agent: http://localhost:8001/health
+#   mcp-server:    http://localhost:8002/health
+#   searxng:       http://localhost:8080
+#   ollama embed:  http://localhost:11434
+#   ollama reason: http://localhost:11435
+
+agents:
+  triage:
+    prompt_file: agents/01_triage.md
+    model:
+      default: haiku
+      escalation: sonnet
+      allow_escalation: true
+      temperature: 0.1
+      max_tokens: low
+    tools:
+      allowed:
+        - shell
+        - docker
+        - http_request
+        - file_read
+        - file_write_artifacts
+      forbidden:
+        - file_write_repo
+        - git_commit
+        - destructive_shell
+    scope:
+      read:
+        - docker-compose.yml
+        - docker-compose.*.yml
+        - backend/
+        - workers/
+      write:
+        - artifacts/error_packet.md
+    runbook:
+      primary_commands:
+        - "docker compose ps"
+        - "docker compose logs --tail=200 backend"
+        - "curl -fsS http://localhost:8000/health || true"
+        - "docker exec refinery_redis redis-cli llen jobs:crawl"
+  fix:
+    prompt_file: agents/02_fix.md
+    model:
+      default: sonnet
+      escalation: opus
+      allow_escalation: true
+      temperature: 0.2
+      max_tokens: medium
+    tools:
+      allowed:
+        - shell
+        - file_read
+        - file_write_repo
+        - patch_apply
+      forbidden:
+        - git_push
+        - destructive_shell
+        - docker_prune
+    scope:
+      read:
+        - backend/
+        - workers/
+        - docker-compose.yml
+      write:
+        - backend/
+        - workers/
+        - artifacts/error_packet.md
+    guardrails:
+      prefer_minimal_diff: true
+      max_files_changed: 3
+  verify:
+    prompt_file: agents/03_verify.md
+    model:
+      default: haiku
+      escalation: sonnet
+      allow_escalation: true
+      temperature: 0.1
+      max_tokens: low
+    tools:
+      allowed:
+        - shell
+        - docker
+        - http_request
+        - file_read
+        - file_write_artifacts
+      forbidden:
+        - file_write_repo
+        - destructive_shell
+    scope:
+      write:
+        - artifacts/error_packet.md
+  escalate:
+    prompt_file: agents/04_escalate.md
+    model:
+      default: sonnet
+      escalation: opus
+      allow_escalation: true
+      temperature: 0.2
+      max_tokens: high
+    tools:
+      allowed:
+        - shell
+        - docker
+        - http_request
+        - file_read
+        - file_write_repo
+        - patch_apply
+      forbidden:
+        - destructive_shell
+        - git_push
+    scope:
+      read:
+        - backend/
+        - workers/
+        - docker-compose.yml
+      write:
+        - backend/
+        - workers/
+        - artifacts/error_packet.md
+  compose_auditor:
+    prompt_file: agents/05_compose_auditor.md
+    model:
+      default: haiku
+      escalation: sonnet
+      allow_escalation: true
+      temperature: 0.1
+      max_tokens: low
+    tools:
+      allowed:
+        - shell
+        - docker
+        - file_read
+        - file_write_artifacts
+      forbidden:
+        - file_write_repo
+        - destructive_shell
+    scope:
+      read:
+        - docker-compose.yml
+        - docker-compose.*.yml
+      write:
+        - artifacts/compose_audit.md
+  pipeline_operator:
+    prompt_file: agents/06_pipeline_operator.md
+    model:
+      default: haiku
+      escalation: sonnet
+      allow_escalation: true
+      temperature: 0.1
+      max_tokens: low
+    tools:
+      allowed:
+        - shell
+        - docker
+        - http_request
+        - file_read
+        - file_write_artifacts
+      forbidden:
+        - file_write_repo
+        - destructive_shell
+    scope:
+      write:
+        - artifacts/pipeline_ops.md
+  db_optimizer:
+    prompt_file: agents/db-optimizer.md
+    model:
+      default: sonnet
+      allow_escalation: false
+      temperature: 0.2
+      max_tokens: high
+    tools:
+      allowed:
+        - shell
+        - docker
+        - file_read
+        - file_write_repo
+      forbidden:
+        - destructive_shell
+        - git_push
+    scope:
+      read:
+        - db/
+        - backend/
+        - workers/
+      write:
+        - db/
+        - backend/
+  docker_expert:
+    prompt_file: agents/docker-containerization-expert.md
+    model:
+      default: sonnet
+      allow_escalation: false
+      temperature: 0.2
+      max_tokens: medium
+    tools:
+      allowed:
+        - shell
+        - docker
+        - file_read
+        - file_write_repo
+      forbidden:
+        - destructive_shell
+        - git_push
+    scope:
+      read:
+        - docker-compose.yml
+        - docker-compose.*.yml
+        - backend/Dockerfile
+        - workers/
+      write:
+        - docker-compose.yml
+        - backend/Dockerfile
+        - workers/

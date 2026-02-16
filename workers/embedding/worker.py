@@ -76,13 +76,20 @@ def process_document(doc_id):
 
 
 def main():
+    from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+    shutdown = GracefulShutdown()
+
     print(f"[embedding] Worker started. Queue={Config.WORKER_QUEUE} "
           f"Ollama={Config.OLLAMA_BASE_URL} Model={Config.EMBEDDING_MODEL}")
+
+    wait_for_db()
+    wait_for_redis()
 
     # Pull model if not yet available (blocks until done)
     ensure_model_available(Config.EMBEDDING_MODEL)
 
-    while True:
+    while shutdown.is_running():
         try:
             job = pop_job(Config.WORKER_QUEUE, timeout=Config.POLL_TIMEOUT)
             if job:
@@ -97,6 +104,8 @@ def main():
             except Exception:
                 pass
         time.sleep(0.1)
+
+    shutdown.cleanup()
 
 
 if __name__ == "__main__":

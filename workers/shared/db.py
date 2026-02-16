@@ -1,4 +1,5 @@
 """PostgreSQL connection pool for workers."""
+import atexit
 import psycopg2
 import psycopg2.pool
 from shared.config import Config
@@ -25,7 +26,26 @@ def get_pool():
             keepalives_interval=10,
             keepalives_count=5
         )
+        # Register atexit handler as a safety net so connections are not
+        # leaked if graceful.cleanup() is never called (e.g. unexpected exit).
+        atexit.register(close_pool)
     return _pool
+
+
+def close_pool():
+    """Close all connections in the pool and reset the global reference.
+
+    Safe to call multiple times (idempotent).
+    """
+    global _pool
+    if _pool is not None:
+        try:
+            _pool.closeall()
+            logger.info("PostgreSQL connection pool closed.")
+        except Exception as e:
+            logger.warning(f"Error closing PostgreSQL pool: {e}")
+        finally:
+            _pool = None
 
 
 def get_connection(max_retries=3, retry_delay=1):

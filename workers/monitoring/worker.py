@@ -158,20 +158,33 @@ class MonitoringAgent:
 
     def run(self):
         """Main monitoring loop."""
+        from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+        self._shutdown = GracefulShutdown()
+
         logger.info("Monitor agent started, starting metrics server...")
+
+        wait_for_db()
+        wait_for_redis()
 
         # Start HTTP metrics server in background thread
         start_metrics_server(port=8001)
 
         logger.info(f"Entering monitoring loop (interval={self.interval}s)")
 
-        while True:
+        while self._shutdown.is_running():
             try:
                 self.run_monitoring_cycle()
             except Exception as e:
                 logger.error(f"Unexpected error in monitoring loop: {e}", exc_info=True)
 
-            time.sleep(self.interval)
+            # Sleep in 1s increments to allow fast shutdown
+            for _ in range(self.interval):
+                if not self._shutdown.is_running():
+                    break
+                time.sleep(1)
+
+        self._shutdown.cleanup()
 
 
 if __name__ == "__main__":

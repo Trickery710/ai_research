@@ -111,9 +111,17 @@ def process_document(doc_id):
 
 
 def main():
+    from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+    shutdown = GracefulShutdown()
+
     print(f"[chunking] Worker started. Queue={Config.WORKER_QUEUE} "
           f"Next={Config.NEXT_QUEUE}")
-    while True:
+
+    wait_for_db()
+    wait_for_redis()
+
+    while shutdown.is_running():
         try:
             job = pop_job(Config.WORKER_QUEUE, timeout=Config.POLL_TIMEOUT)
             if job:
@@ -128,6 +136,8 @@ def main():
             except Exception:
                 pass
         time.sleep(0.1)
+
+    shutdown.cleanup()
 
 
 if __name__ == "__main__":

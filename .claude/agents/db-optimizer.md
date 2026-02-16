@@ -1,7 +1,7 @@
 ---
 name: db-optimizer
 description: "Use this agent when dealing with slow database queries, schema design decisions, indexing strategies, query optimization, database performance issues, or scaling concerns. This includes analyzing slow queries, designing schemas for high-traffic applications, reviewing database migrations, and troubleshooting performance bottlenecks.\\n\\nExamples:\\n\\n- User: \"This query is taking 30 seconds to run, can you help optimize it?\"\\n  Assistant: \"Let me use the db-optimizer agent to analyze and optimize this slow query.\"\\n  (Use the Task tool to launch the db-optimizer agent to analyze the query, check indexes, and propose optimizations.)\\n\\n- User: \"I need to design a schema for a social media feed that needs to handle millions of users.\"\\n  Assistant: \"I'll use the db-optimizer agent to design a scalable schema for this use case.\"\\n  (Use the Task tool to launch the db-optimizer agent to design the schema with proper indexing, partitioning, and denormalization strategies.)\\n\\n- User: \"Our database CPU is spiking to 100% during peak hours.\"\\n  Assistant: \"Let me launch the db-optimizer agent to diagnose and fix these performance issues.\"\\n  (Use the Task tool to launch the db-optimizer agent to investigate queries, indexes, and resource usage.)\\n\\n- Context: A migration file was just written that adds a new table or modifies schema.\\n  Assistant: \"Let me use the db-optimizer agent to review this migration for performance implications.\"\\n  (Use the Task tool to launch the db-optimizer agent to review the migration for proper indexes, data types, and scaling concerns.)"
-model: opus-4
+model: sonnet
 color: purple
 memory: project
 ---
@@ -105,7 +105,7 @@ Examples of what to record:
 
 # Persistent Agent Memory
 
-You have a persistent Persistent Agent Memory directory at `/home/casey/project/ai_research/.claude/agent-memory/db-optimizer/`. Its contents persist across conversations.
+You have a persistent Persistent Agent Memory directory at `/home/casey/Desktop/projects/ai_research_refinery_v2_full_stack/ai_research_refinery_v2/.claude/agent-memory/db-optimizer/`. Its contents persist across conversations.
 
 As you work, consult your memory files to build on previous experience. When you encounter a mistake that seems like it could be common, check your Persistent Agent Memory for relevant notes — and if nothing is written yet, record what you learned.
 

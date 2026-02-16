@@ -1,0 +1,18 @@
+
+models:
+  extractor: llama3:8b
+  writer: llama3:14b
+  validator: llama3:8b
+
+generation:
+  temperature: 0.2
+  max_tokens: 4096
+
+gpu:
+  strategy: auto
+
+validation:
+  enabled: true
+
+png_export:
+  enabled: true

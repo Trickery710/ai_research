@@ -86,7 +86,7 @@ Examples of what to record:
 
 # Persistent Agent Memory
 
-You have a persistent Persistent Agent Memory directory at `/home/casey/project/ai_research/.claude/agent-memory/docker-containerization-expert/`. Its contents persist across conversations.
+You have a persistent Persistent Agent Memory directory at `/home/casey/Desktop/projects/ai_research_refinery_v2_full_stack/ai_research_refinery_v2/.claude/agent-memory/docker-containerization-expert/`. Its contents persist across conversations.
 
 As you work, consult your memory files to build on previous experience. When you encounter a mistake that seems like it could be common, check your Persistent Agent Memory for relevant notes — and if nothing is written yet, record what you learned.
 

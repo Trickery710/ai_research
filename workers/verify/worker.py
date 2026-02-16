@@ -293,14 +293,21 @@ def log_key_stats():
 
 
 def main():
+    from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+    shutdown = GracefulShutdown()
+
     print(f"[verify] Worker started. Model={VERIFY_MODEL}, "
           f"interval={VERIFY_INTERVAL}s")
+
+    wait_for_db()
+    wait_for_redis()
 
     mgr = get_key_manager()
     print(f"[verify] Loaded {len(mgr.keys)} API key(s)")
 
     cycle = 0
-    while True:
+    while shutdown.is_running():
         try:
             did_work = verify_one()
 
@@ -309,14 +316,26 @@ def main():
                 log_key_stats()
 
             if did_work:
-                time.sleep(VERIFY_INTERVAL)
+                # Use shorter sleep intervals to check shutdown flag regularly
+                for _ in range(VERIFY_INTERVAL):
+                    if not shutdown.is_running():
+                        break
+                    time.sleep(1)
             else:
-                time.sleep(VERIFY_INTERVAL * 4)
+                for _ in range(VERIFY_INTERVAL * 4):
+                    if not shutdown.is_running():
+                        break
+                    time.sleep(1)
 
         except Exception as e:
             print(f"[verify] ERROR: {e}")
             traceback.print_exc()
-            time.sleep(60)
+            for _ in range(60):
+                if not shutdown.is_running():
+                    break
+                time.sleep(1)
+
+    shutdown.cleanup()
 
 
 if __name__ == "__main__":

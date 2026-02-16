@@ -1,11 +1,13 @@
-"""Conflict Resolution Worker.
+"""Conflict Resolution / Reasoning Agent Worker.
 
 After extraction completes for a document, this worker:
 1. Recalculates confidence_score for all DTC codes using
    source_count and average trust_score from linked source chunks.
 2. Deduplicates causes (same DTC + same description).
 3. Deduplicates diagnostic steps (same DTC + same description).
-4. Marks the document as 'complete' (terminal stage).
+4. Runs knowledge graph upserter: scores, merges, deduplicates,
+   and upserts into normalized knowledge.* tables.
+5. Marks the document as 'complete' (terminal stage).
 
 Queue: jobs:resolve
 Payload: document UUID string
@@ -13,9 +15,16 @@ Next: (none -- terminal)
 """
 import sys
 import time
+import logging
 import traceback
 
 sys.path.insert(0, "/app")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] [conflict] %(levelname)s: %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 from shared.config import Config
 from shared.redis_client import pop_job
@@ -112,6 +121,21 @@ def deduplicate_diagnostic_steps():
         return_connection(conn)
 
 
+def run_knowledge_graph_upsert() -> dict:
+    """Run the knowledge graph reasoning agent.
+
+    Scores, merges, deduplicates, and upserts extracted data
+    into the normalized knowledge.* tables.
+    """
+    try:
+        from upserter import KnowledgeUpserter
+        upserter = KnowledgeUpserter()
+        return upserter.process_all()
+    except Exception as e:
+        logger.warning(f"Knowledge graph upsert skipped or failed: {e}")
+        return {"error": str(e)}
+
+
 def process_document(doc_id):
     """Run conflict resolution for a document, then mark it complete."""
     start_time = time.time()
@@ -119,27 +143,48 @@ def process_document(doc_id):
     update_document_stage(doc_id, "resolving")
     log_processing(doc_id, "resolving", "started")
 
+    # Legacy: recalculate refined.dtc_codes confidence
     dtc_updated = recalculate_dtc_confidence()
     causes_deduped = deduplicate_causes()
     steps_deduped = deduplicate_diagnostic_steps()
 
+    # New: knowledge graph upsert with scoring + merging
+    kg_stats = run_knowledge_graph_upsert()
+
     duration_ms = int((time.time() - start_time) * 1000)
+    kg_summary = ""
+    if kg_stats and not kg_stats.get("error"):
+        kg_summary = (
+            f", KG: masters={kg_stats.get('dtc_master_upserted', 0)}"
+            f" causes={kg_stats.get('causes_upserted', 0)}"
+            f" steps={kg_stats.get('steps_upserted', 0)}"
+            f" merged={kg_stats.get('entities_merged', 0)}"
+        )
+
     message = (
         f"DTC scores updated: {dtc_updated}, "
         f"causes deduped: {causes_deduped}, "
         f"steps deduped: {steps_deduped}"
+        f"{kg_summary}"
     )
     log_processing(doc_id, "resolving", "completed", message, duration_ms)
 
     # Terminal stage: mark document as complete
     update_document_stage(doc_id, "complete")
-    print(f"[conflict] doc={doc_id} {message} ms={duration_ms}")
+    logger.info(f"doc={doc_id} {message} ms={duration_ms}")
 
 
 def main():
+    from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+    shutdown = GracefulShutdown()
+
     print(f"[conflict] Worker started. Queue={Config.WORKER_QUEUE}")
 
-    while True:
+    wait_for_db()
+    wait_for_redis()
+
+    while shutdown.is_running():
         try:
             job = pop_job(Config.WORKER_QUEUE, timeout=Config.POLL_TIMEOUT)
             if job:
@@ -155,6 +200,8 @@ def main():
             except Exception:
                 pass
         time.sleep(0.1)
+
+    shutdown.cleanup()
 
 
 if __name__ == "__main__":

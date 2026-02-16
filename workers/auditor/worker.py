@@ -123,11 +123,18 @@ def handle_directive(directive_json):
 
 
 def main():
+    from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+    shutdown = GracefulShutdown()
+
     print(f"[auditor] Worker started. Interval={AUDIT_INTERVAL}s, Queue={AUDIT_QUEUE}")
+
+    wait_for_db()
+    wait_for_redis()
 
     last_audit = 0
 
-    while True:
+    while shutdown.is_running():
         try:
             # Check for directives from orchestrator (non-blocking, short timeout)
             directive = pop_job(AUDIT_QUEUE, timeout=2)
@@ -146,6 +153,8 @@ def main():
             traceback.print_exc()
 
         time.sleep(1)
+
+    shutdown.cleanup()
 
 
 if __name__ == "__main__":

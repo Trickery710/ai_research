@@ -169,9 +169,16 @@ class HealingAgent:
 
     def run(self):
         """Main healing loop."""
+        from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+        self._shutdown = GracefulShutdown()
+
+        wait_for_db()
+        wait_for_redis()
+
         logger.info(f"Healing agent started, listening on {self.alert_queue}")
 
-        while True:
+        while self._shutdown.is_running():
             try:
                 alert_json = pop_job(self.alert_queue, timeout=5)
                 if alert_json:
@@ -180,6 +187,8 @@ class HealingAgent:
                 logger.error(f"Error processing alert: {e}", exc_info=True)
 
             time.sleep(0.5)
+
+        self._shutdown.cleanup()
 
 
 def ensure_healing_log_table():

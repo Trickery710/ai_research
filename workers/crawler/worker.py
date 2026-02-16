@@ -205,10 +205,17 @@ def process_crawl_job(crawl_id):
 
 
 def main():
+    from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+    shutdown = GracefulShutdown()
+
     print(f"[crawler] Worker started. Queue={Config.WORKER_QUEUE} "
           f"Next={Config.NEXT_QUEUE}")
 
-    while True:
+    wait_for_db()
+    wait_for_redis()
+
+    while shutdown.is_running():
         try:
             job = pop_job(Config.WORKER_QUEUE, timeout=Config.POLL_TIMEOUT)
             if job:
@@ -217,6 +224,8 @@ def main():
             print(f"[crawler] ERROR: {e}")
             traceback.print_exc()
         time.sleep(0.5)
+
+    shutdown.cleanup()
 
 
 if __name__ == "__main__":

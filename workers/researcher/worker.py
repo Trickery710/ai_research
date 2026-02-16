@@ -331,6 +331,9 @@ def run_autonomous_cycle():
 
 def main():
     from source_registry import init_default_sources
+    from shared.graceful import GracefulShutdown, wait_for_db, wait_for_redis
+
+    shutdown = GracefulShutdown()
 
     print(f"[researcher] Worker started. Queue={RESEARCH_QUEUE}")
     print(f"[researcher] Autonomous={AUTONOMOUS_MODE}, "
@@ -339,9 +342,12 @@ def main():
     print(f"[researcher] Rate limits: {MAX_URLS_PER_HOUR}/hr total, "
           f"{MAX_PER_DOMAIN_PER_HOUR}/domain/hr, {COOLDOWN_SECONDS}s cooldown")
 
+    wait_for_db()
+    wait_for_redis()
+
     init_default_sources()
 
-    while True:
+    while shutdown.is_running():
         try:
             # Check for orchestrator directives (short timeout)
             directive = pop_job(RESEARCH_QUEUE, timeout=2)
@@ -362,6 +368,8 @@ def main():
             traceback.print_exc()
 
         time.sleep(1)
+
+    shutdown.cleanup()
 
 
 if __name__ == "__main__":

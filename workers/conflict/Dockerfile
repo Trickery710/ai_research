@@ -19,6 +19,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy shared modules and worker code
 COPY shared/ ./shared/
 COPY conflict/worker.py .
+COPY conflict/scorer.py .
+COPY conflict/merger.py .
+COPY conflict/upserter.py .
 
 # Remove any Python cache files
 RUN find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \

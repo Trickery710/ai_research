@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Refinery Agent Registry",
+  "type": "object",
+  "required": [
+    "version",
+    "project",
+    "agents"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer"
+    },
+    "project": {
+      "type": "string"
+    },
+    "defaults": {
+      "type": "object"
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "prompt_file",
+          "model",
+          "tools",
+          "scope"
+        ],
+        "properties": {
+          "prompt_file": {
+            "type": "string"
+          },
+          "model": {
+            "type": "object",
+            "required": [
+              "default"
+            ],
+            "properties": {
+              "default": {
+                "type": "string"
+              },
+              "escalation": {
+                "type": "string"
+              },
+              "allow_escalation": {
+                "type": "boolean"
+              },
+              "temperature": {
+                "type": "number"
+              },
+              "max_tokens": {
+                "type": "string"
+              }
+            }
+          },
+          "tools": {
+            "type": "object",
+            "required": [
+              "allowed"
+            ],
+            "properties": {
+              "allowed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "forbidden": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "scope": {
+            "type": "object"
+          },
+          "runbook": {
+            "type": "object"
+          },
+          "guardrails": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}
