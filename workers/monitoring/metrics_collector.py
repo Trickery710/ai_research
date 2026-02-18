@@ -56,16 +56,17 @@ def collect_processing_stats() -> dict:
 
         stats = {}
         for row in rows:
-            stage = row['stage']
+            stage = row[0]
+            status = row[1]
+            count = row[2]
             if stage not in stats:
                 stats[stage] = {'total': 0, 'completed': 0, 'failed': 0}
 
-            count = row['count']
             stats[stage]['total'] += count
 
-            if row['status'] == 'completed':
+            if status == 'completed':
                 stats[stage]['completed'] += count
-            elif row['status'] == 'failed':
+            elif status == 'failed':
                 stats[stage]['failed'] += count
 
         return stats
@@ -159,7 +160,7 @@ def collect_document_stats() -> dict:
             fetch=True
         ) or []
 
-        by_stage = {row['processing_stage']: row['count'] for row in stage_counts}
+        by_stage = {row[0]: row[1] for row in stage_counts}
 
         # Documents stuck in processing (> 30 minutes in same stage)
         cutoff = datetime.now() - timedelta(minutes=30)
@@ -174,10 +175,11 @@ def collect_document_stats() -> dict:
 
         stuck_by_stage = {}
         for doc in stuck_docs:
-            stage = doc['processing_stage']
+            doc_id = str(doc[0])
+            stage = doc[1]
             if stage not in stuck_by_stage:
                 stuck_by_stage[stage] = []
-            stuck_by_stage[stage].append(str(doc['id']))
+            stuck_by_stage[stage].append(doc_id)
 
         return {
             'by_stage': by_stage,

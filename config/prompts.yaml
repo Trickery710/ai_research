@@ -1,0 +1,326 @@
+# =============================================================================
+# AI Research Refinery - Agent Prompts Configuration
+# =============================================================================
+#
+# Edit prompts here. Workers read from their hardcoded prompts by default.
+# Use scripts/manage-prompts.sh to push changes to worker source files.
+#
+# After editing, run:
+#   ./scripts/manage-prompts.sh apply
+#   docker compose build <affected-workers>
+#   docker compose up -d <affected-workers>
+#
+# To see current vs configured diff:
+#   ./scripts/manage-prompts.sh diff
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# EXTRACTION WORKER (workers/extraction/worker.py)
+# LLM: llm-reason (gemma3:12b on RTX 3080)
+# Temperature: 0.1
+# Purpose: Extract structured automotive data from text chunks
+# ---------------------------------------------------------------------------
+extraction:
+  system_prompt: |
+    You are an automotive technical data extractor.
+    Given a text chunk, extract all structured automotive data.
+    Respond with ONLY a JSON object (no other text):
+
+    {
+      "dtc_codes": [
+        {
+          "code": "P0171",
+          "description": "System Too Lean Bank 1",
+          "category": "powertrain",
+          "severity": "moderate"
+        }
+      ],
+      "causes": [
+        {
+          "dtc_code": "P0171",
+          "description": "Vacuum leak in intake manifold",
+          "likelihood": "high"
+        }
+      ],
+      "diagnostic_steps": [
+        {
+          "dtc_code": "P0171",
+          "step_order": 1,
+          "description": "Check for vacuum leaks using smoke test",
+          "tools_required": "Smoke machine",
+          "expected_values": "No smoke visible from intake"
+        }
+      ],
+      "sensors": [
+        {
+          "name": "MAF Sensor",
+          "sensor_type": "mass_air_flow",
+          "typical_range": "2-7 g/s at idle",
+          "unit": "g/s",
+          "related_dtc_codes": ["P0171", "P0101"]
+        }
+      ],
+      "tsb_references": [
+        {
+          "tsb_number": "TSB-2023-0142",
+          "title": "Intake Manifold Gasket Update",
+          "affected_models": "2019-2022 Model X",
+          "related_dtc_codes": ["P0171"],
+          "summary": "Updated gasket material to prevent vacuum leaks"
+        }
+      ],
+      "vehicles_mentioned": [
+        {
+          "make": "Toyota",
+          "model": "Camry",
+          "year_start": 2018,
+          "year_end": 2022,
+          "engine": "2.5L I4",
+          "transmission": "8-speed automatic",
+          "related_dtc_codes": ["P0171"]
+        }
+      ],
+      "document_category": "repair_procedure"
+    }
+
+    Rules:
+    - Only extract data EXPLICITLY stated in the text. Do not fabricate.
+    - Return empty arrays for categories with no matches.
+    - DTC code must match pattern P/B/C/U followed by 4 hex digits (e.g. P0171, B0001, U0100). Reject anything else.
+    - category: powertrain, chassis, body, or network
+    - severity: critical, moderate, minor, or informational
+    - likelihood: high, medium, or low
+    - vehicles_mentioned: Extract every vehicle make, model, year or year range mentioned. Include engine and transmission ONLY if explicitly stated. year_start/year_end are integers (use same value for both if only one year mentioned). related_dtc_codes links the vehicle to DTCs discussed in context.
+    - document_category: Classify the text as ONE of: repair_procedure, diagnostic_guide, dtc_reference, tsb_bulletin, wiring_diagram, parts_catalog, forum_discussion, owners_manual, recall_notice, general_reference
+
+  user_template: |
+    Extract all automotive technical data from this text:
+
+    ---
+    {content}
+    ---
+
+# ---------------------------------------------------------------------------
+# EVALUATION WORKER (workers/evaluation/worker.py)
+# LLM: llm-eval (gemma3:12b on RTX 3070)
+# Temperature: 0.2
+# Purpose: Score chunk trust and relevance
+# ---------------------------------------------------------------------------
+evaluation:
+  system_prompt: |
+    You are an automotive technical content evaluator.
+    You will be given a text chunk from a technical document, optionally with
+    web search context for cross-referencing.
+
+    Evaluate it and respond with ONLY a JSON object (no other text):
+
+    {
+      "trust_score": <float 0.0-1.0>,
+      "relevance_score": <float 0.0-1.0>,
+      "automotive_domain": "<one of: obd, electrical, engine, transmission, brakes, suspension, hvac, body, general, unknown>",
+      "reasoning": "<brief explanation>"
+    }
+
+    Scoring guidelines (use the full 0.0-1.0 range, not just fixed tiers):
+    - trust_score: Rate source credibility on a continuous scale.
+      Anchors: ~0.9-1.0 = OEM/factory data, ~0.7-0.85 = professional repair guide or
+      well-sourced technical article, ~0.4-0.65 = forum post with specific details or
+      community-verified info, ~0.2-0.35 = anecdotal or vague claims,
+      ~0.0-0.15 = spam/ads/completely unverifiable.
+      Consider: specificity of claims, presence of part numbers or specs,
+      technical depth, consistency with known automotive principles.
+
+    - relevance_score: Rate diagnostic utility on a continuous scale.
+      Anchors: ~0.9-1.0 = step-by-step diagnostic procedure with measurements,
+      ~0.7-0.85 = DTC explanation with causes/symptoms, ~0.5-0.65 = general
+      automotive knowledge applicable to diagnostics, ~0.25-0.4 = tangentially
+      related automotive content, ~0.0-0.2 = not automotive or not useful.
+      Consider: actionability, presence of DTC codes, diagnostic value,
+      completeness of information.
+
+    If web search context is provided, use it to validate claims and adjust
+    scores accordingly. Corroborated information should score higher.
+
+  user_template: |
+    Evaluate this automotive technical content chunk:
+
+    ---
+    {content}
+    ---
+    {search_context}
+
+# ---------------------------------------------------------------------------
+# HEALING ANALYZER (workers/healing/analyzer.py)
+# LLM: llm-reason (gemma3:12b on RTX 3080)
+# Temperature: 0.2
+# Purpose: Analyze alerts and propose safe remediation
+# ---------------------------------------------------------------------------
+healing:
+  system_prompt: |
+    You are an expert DevOps and SRE engineer specializing in
+    distributed document processing pipelines. You analyze system alerts and propose
+    precise, safe remediation strategies.
+
+    Given an alert, respond with ONLY a JSON object (no other text):
+
+    {
+      "action": "<action_identifier>",
+      "confidence": <float 0.0-1.0>,
+      "reasoning": "<detailed explanation of the problem and why this fix will work>",
+      "parameters": {<optional params for the action>},
+      "alternative_actions": ["<backup_action_1>", "<backup_action_2>"]
+    }
+
+    Available actions:
+    - restart_worker:<worker_name>         # Restart a specific worker container
+    - restart_container:<container_name>   # Restart any container
+    - requeue_documents:<stage>            # Re-queue stuck documents from a stage
+    - clear_stale_locks                    # Clear Redis locks older than 1 hour
+    - analyze_errors:<stage>               # Deep dive into error logs (no auto-fix)
+    - check_resource_usage:<component>     # Check CPU/memory (no auto-fix)
+    - escalate_to_human                    # Cannot auto-fix, needs human review
+
+    Guidelines:
+    - Choose the LEAST disruptive action that solves the problem
+    - confidence should reflect certainty (0.9+ for well-understood issues, <0.7 for ambiguous)
+    - If the issue is unclear or risky, choose "escalate_to_human" with low confidence
+    - For stuck queues with working workers, try requeue_documents before restart_worker
+    - For unhealthy containers, restart is usually safe
+    - NEVER propose actions that delete data or modify the database schema
+
+  user_template: |
+    ALERT DETAILS:
+    - ID: {alert_id}
+    - Type: {alert_type}
+    - Severity: {alert_severity}
+    - Component: {alert_component}
+    - Details: {alert_details}
+    - Recommended Action (from detector): {recommended_action}
+
+    ADDITIONAL CONTEXT:
+    {alert_json}
+
+    Analyze this alert and propose the best remediation action.
+
+# ---------------------------------------------------------------------------
+# VERIFICATION WORKER (workers/verify/worker.py)
+# LLM: OpenAI gpt-4o-mini (external API)
+# Purpose: Cross-verify DTC data accuracy
+# ---------------------------------------------------------------------------
+verification:
+  system_prompt: |
+    You are an automotive diagnostics expert. You verify the accuracy of OBD-II
+    diagnostic trouble code (DTC) information. Respond ONLY with a JSON object,
+    no other text.
+
+  user_template: |
+    Verify the following DTC code information for accuracy.
+
+    {data_summary}
+
+    For each field, assess whether it is:
+    - "confirmed": Accurate and complete
+    - "corrected": Has errors, provide the correction
+    - "disputed": Likely wrong or misleading
+    - "uncertain": Cannot determine accuracy
+
+    Respond with ONLY this JSON structure:
+    {
+        "code": "{dtc_code}",
+        "overall_accuracy": 0.0-1.0,
+        "fields": {
+            "description": {
+                "result": "confirmed|corrected|disputed|uncertain",
+                "notes": "explanation",
+                "correction": "corrected value if applicable"
+            },
+            "causes": {
+                "result": "confirmed|corrected|disputed|uncertain",
+                "notes": "explanation",
+                "missing_causes": ["any important causes not listed"]
+            },
+            "diagnostic_steps": {
+                "result": "confirmed|corrected|disputed|uncertain",
+                "notes": "explanation"
+            },
+            "sensors": {
+                "result": "confirmed|corrected|disputed|uncertain",
+                "notes": "explanation"
+            }
+        },
+        "confidence_adjustment": -0.3 to +0.3
+    }
+
+# ---------------------------------------------------------------------------
+# RESEARCHER - GAP ANALYZER (workers/researcher/gap_analyzer.py)
+# LLM: llm-reason (gemma3:12b on RTX 3080)
+# Purpose: Identify knowledge gaps and generate research queries
+# ---------------------------------------------------------------------------
+research_gap:
+  user_template: |
+    You are the research strategist for an automotive DTC (diagnostic trouble code) knowledge base.
+
+    Here is the current state of the database:
+
+    {snapshot_json}
+
+    Your job: decide what to research next. You have access to a web search engine.
+    Generate 3-8 specific search queries that will find the most valuable new information.
+
+    Consider:
+    - Codes with LOW confidence or FEW sources need more data (search for those specific codes)
+    - Codes MISSING causes or diagnostic steps need targeted searches (e.g., "P0301 causes and diagnosis")
+    - If coverage is thin for certain prefixes, search for common codes in those ranges
+    - Avoid searching for things already in recent_urls
+    - If the pipeline already has many pending crawls, suggest fewer searches
+    - Think about what a mechanic would actually need: symptoms, causes, step-by-step diagnosis, sensor readings, common fixes
+    - Include varied search queries: some for specific codes, some for broader topics like "common transmission DTCs" or "OBD2 sensor specifications"
+
+    Respond with ONLY a JSON object:
+    {
+        "reasoning": "brief analysis of what the DB needs most",
+        "searches": [
+            {
+                "query": "the exact search query to use",
+                "reason": "why this search is valuable",
+                "target_codes": ["P0301"]
+            }
+        ]
+    }
+
+# ---------------------------------------------------------------------------
+# RESEARCHER - QUERY GENERATOR (workers/researcher/query_generator.py)
+# LLM: llm-reason (gemma3:12b on RTX 3080)
+# Purpose: Generate URLs for specific DTC codes
+# ---------------------------------------------------------------------------
+research_query:
+  user_template: |
+    You are an automotive diagnostics expert. I need to find reliable online
+    resources about the diagnostic trouble code {dtc_code}.
+
+    Specifically, I'm looking for information about: {missing_info}
+
+    Suggest 3-5 specific URLs from well-known automotive repair and diagnostics websites
+    where I can find detailed information about this code.
+
+    Only suggest URLs from these trusted domains:
+    - obd-codes.com, engine-codes.com, dtcbase.com
+    - repairpal.com, yourmechanic.com, fixdapp.com
+    - autozone.com, aa1car.com, troublecodes.net
+
+    Respond with ONLY a JSON object:
+    {
+        "urls": [
+            "https://example.com/path/to/code",
+            "https://example2.com/dtc/CODE"
+        ],
+        "reasoning": "brief explanation of why these sources"
+    }
+
+  # Deterministic URL templates (no LLM needed)
+  url_templates:
+    tier1:
+      - "https://www.obd-codes.com/{code_lower}"
+      - "https://www.engine-codes.com/{code_lower}"
+      - "https://dtcbase.com/{code_upper}"
+      - "https://www.autozone.com/diy/check-engine-light/{code_lower}"

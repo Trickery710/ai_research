@@ -89,8 +89,9 @@ services:
   # LLM SERVICES (GPU-accelerated Ollama instances)
   # GPU assignment via device_ids ensures each container only
   # sees its assigned GPU. Set in .env:
-  #   GPU_EMBED=0  (Quadro P1000 4GB - nomic-embed-text)
-  #   GPU_REASON=1 (RTX 3080 10GB   - mistral reasoning + reason2)
+  #   GPU_EMBED=0  (Quadro P1000 4GB  - nomic-embed-text)
+  #   GPU_REASON=1 (RTX 3080 10GB   - gemma3:12b extraction/reasoning)
+  #   GPU_EVAL=2   (RTX 3070 8GB    - gemma3:12b evaluation)
   # ----------------------------------------------------------
   llm-embed:
     image: ollama/ollama
@@ -144,12 +145,13 @@ services:
     networks:
       - refinery
 
-  # Second reasoning instance on RTX 3080 (alongside primary reasoning)
-  # Both reason + reason2 share the 3080's 10GB VRAM
-  llm-reason2:
+  # Evaluation LLM on RTX 3070 (GPU 2) - dedicated to chunk evaluation
+  llm-eval:
     image: ollama/ollama
-    container_name: refinery_llm_reason2
+    container_name: refinery_llm_eval
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:11436:11434"
     volumes:
       - ollama_reason2_data:/root/.ollama
     environment:
@@ -159,7 +161,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["${GPU_REASON:-1}"]
+              device_ids: ["${GPU_EVAL:-2}"]
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "ollama", "list"]
@@ -277,15 +279,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      llm-reason:
+      llm-eval:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://refinery:refinery@postgres:5432/refinery}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-      OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: mistral
+      OLLAMA_BASE_URL: "http://llm-eval:11434"
+      REASONING_MODEL: "gemma3:12b"
       WORKER_QUEUE: "jobs:evaluate"
       NEXT_QUEUE: "jobs:extract"
       SEARXNG_URL: "http://searxng:8080"
@@ -313,7 +315,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: mistral
+      REASONING_MODEL: "gemma3:12b"
       WORKER_QUEUE: "jobs:extract"
       NEXT_QUEUE: "jobs:resolve"
     networks:
@@ -453,9 +455,9 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: mistral
+      REASONING_MODEL: "gemma3:12b"
       AUTO_FIX_ENABLED: "true"
-      AUTO_FIX_ALLOW: "restart_worker,requeue_documents,clear_stale_locks"
+      AUTO_FIX_ALLOW: "restart_worker,requeue_documents,requeue_errors,clear_stale_locks"
       AUTO_FIX_DENY: "restart_container,database_operations,delete_data"
       MAX_ACTIONS_PER_HOUR: "10"
       COOLDOWN_BETWEEN_ACTIONS: "120"
@@ -509,7 +511,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: mistral
+      REASONING_MODEL: "gemma3:12b"
       ORCHESTRATOR_CYCLE: ${ORCHESTRATOR_CYCLE:-60}
       ORCHESTRATOR_AUTO_RESEARCH: ${ORCHESTRATOR_AUTO_RESEARCH:-true}
       MAX_GPU_QUEUE_ITEMS: "20"
@@ -538,7 +540,7 @@ services:
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       OLLAMA_BASE_URL: "http://llm-reason:11434"
-      REASONING_MODEL: mistral
+      REASONING_MODEL: "gemma3:12b"
       SEARXNG_URL: "http://searxng:8080"
       AUTONOMOUS_MODE: ${AUTONOMOUS_MODE:-true}
       AUTONOMOUS_INTERVAL: "60"

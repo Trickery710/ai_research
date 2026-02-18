@@ -1,5 +1,7 @@
-version: 1
+version: 2
 project: ai_research_refinery
+architecture: agents/00_ARCHITECTURE.md
+
 defaults:
   log_caps:
     max_log_lines: 200
@@ -20,7 +22,7 @@ defaults:
 
 # All services in docker-compose.yml:
 #   Infrastructure: postgres, redis, minio, searxng
-#   LLM: llm-embed, llm-reason, llm-reason2
+#   LLM: llm-embed, llm-reason, llm-eval
 #   Backend: backend
 #   Workers: worker-crawler, worker-chunking, worker-embedding, worker-evaluation,
 #            worker-extraction, worker-conflict, worker-verify
@@ -35,10 +37,16 @@ defaults:
 #   searxng:       http://localhost:8080
 #   ollama embed:  http://localhost:11434
 #   ollama reason: http://localhost:11435
+#   ollama eval:   http://localhost:11436
+
+# ============================================================
+# OPERATIONAL AGENTS (runtime issue response)
+# ============================================================
 
 agents:
   triage:
     prompt_file: agents/01_triage.md
+    category: operational
     model:
       default: haiku
       escalation: sonnet
@@ -70,8 +78,10 @@ agents:
         - "docker compose logs --tail=200 backend"
         - "curl -fsS http://localhost:8000/health || true"
         - "docker exec refinery_redis redis-cli llen jobs:crawl"
+
   fix:
     prompt_file: agents/02_fix.md
+    category: operational
     model:
       default: sonnet
       escalation: opus
@@ -100,8 +110,10 @@ agents:
     guardrails:
       prefer_minimal_diff: true
       max_files_changed: 3
+
   verify:
     prompt_file: agents/03_verify.md
+    category: operational
     model:
       default: haiku
       escalation: sonnet
@@ -121,8 +133,10 @@ agents:
     scope:
       write:
         - artifacts/error_packet.md
+
   escalate:
     prompt_file: agents/04_escalate.md
+    category: operational
     model:
       default: sonnet
       escalation: opus
@@ -149,8 +163,10 @@ agents:
         - backend/
         - workers/
         - artifacts/error_packet.md
+
   compose_auditor:
     prompt_file: agents/05_compose_auditor.md
+    category: operational
     model:
       default: haiku
       escalation: sonnet
@@ -172,8 +188,10 @@ agents:
         - docker-compose.*.yml
       write:
         - artifacts/compose_audit.md
+
   pipeline_operator:
     prompt_file: agents/06_pipeline_operator.md
+    category: operational
     model:
       default: haiku
       escalation: sonnet
@@ -193,53 +211,347 @@ agents:
     scope:
       write:
         - artifacts/pipeline_ops.md
-  db_optimizer:
-    prompt_file: agents/db-optimizer.md
+
+  # ============================================================
+  # DEVELOPMENT AGENTS (code modification by domain)
+  # ============================================================
+
+  backend_api:
+    prompt_file: agents/10_backend_api.md
+    category: development
     model:
       default: sonnet
+      escalation: opus
+      allow_escalation: true
+      temperature: 0.2
+      max_tokens: medium
+    tools:
+      allowed:
+        - file_read
+        - file_write_repo
+        - shell
+        - http_request
+      forbidden:
+        - docker
+        - git_push
+        - destructive_shell
+    scope:
+      read:
+        - backend/app/
+        - backend/main.py
+        - backend/requirements.txt
+      write:
+        - backend/app/
+        - backend/main.py
+    guardrails:
+      max_files_changed: 5
+
+  pipeline_workers:
+    prompt_file: agents/11_pipeline_workers.md
+    category: development
+    model:
+      default: sonnet
+      escalation: opus
+      allow_escalation: true
+      temperature: 0.2
+      max_tokens: medium
+    tools:
+      allowed:
+        - file_read
+        - file_write_repo
+        - shell
+      forbidden:
+        - docker
+        - git_push
+        - destructive_shell
+    scope:
+      read:
+        - workers/chunking/
+        - workers/embedding/
+        - workers/evaluation/
+        - workers/extraction/
+        - workers/conflict/
+        - workers/crawler/
+        - workers/verify/
+        - worker/
+        - workers/shared/  # read-only for context
+      write:
+        - workers/chunking/
+        - workers/embedding/
+        - workers/evaluation/
+        - workers/extraction/
+        - workers/conflict/
+        - workers/crawler/
+        - workers/verify/
+        - worker/
+    guardrails:
+      max_files_changed: 6
+
+  autonomous_agents:
+    prompt_file: agents/12_autonomous_agents.md
+    category: development
+    model:
+      default: opus
       allow_escalation: false
       temperature: 0.2
       max_tokens: high
     tools:
       allowed:
-        - shell
-        - docker
         - file_read
         - file_write_repo
+        - shell
       forbidden:
-        - destructive_shell
+        - docker
         - git_push
+        - destructive_shell
     scope:
       read:
-        - db/
-        - backend/
-        - workers/
+        - workers/orchestrator/
+        - workers/researcher/
+        - workers/auditor/
+        - workers/shared/  # read-only for context
       write:
-        - db/
-        - backend/
-  docker_expert:
-    prompt_file: agents/docker-containerization-expert.md
+        - workers/orchestrator/
+        - workers/researcher/
+        - workers/auditor/
+
+  monitoring_healing:
+    prompt_file: agents/13_monitoring_healing.md
+    category: development
     model:
       default: sonnet
-      allow_escalation: false
+      escalation: opus
+      allow_escalation: true
       temperature: 0.2
       max_tokens: medium
     tools:
       allowed:
-        - shell
-        - docker
         - file_read
         - file_write_repo
+        - shell
       forbidden:
-        - destructive_shell
+        - docker
         - git_push
+        - destructive_shell
+    scope:
+      read:
+        - workers/monitoring/
+        - workers/healing/
+        - workers/shared/  # read-only for context
+      write:
+        - workers/monitoring/
+        - workers/healing/
+    guardrails:
+      safety_critical: true
+
+  shared_libraries:
+    prompt_file: agents/14_shared_libraries.md
+    category: development
+    model:
+      default: sonnet
+      escalation: opus
+      allow_escalation: true
+      temperature: 0.2
+      max_tokens: medium
+    tools:
+      allowed:
+        - file_read
+        - file_write_repo
+        - shell
+      forbidden:
+        - docker
+        - git_push
+        - destructive_shell
+    scope:
+      read:
+        - workers/shared/
+        - workers/  # read-only for impact analysis
+      write:
+        - workers/shared/
+    guardrails:
+      cross_cutting: true
+      notify_on_change:
+        - pipeline_workers
+        - autonomous_agents
+        - monitoring_healing
+        - mcp_server
+
+  database_schema:
+    prompt_file: agents/15_database_schema.md
+    category: development
+    model:
+      default: opus
+      allow_escalation: false
+      temperature: 0.1
+      max_tokens: high
+    tools:
+      allowed:
+        - file_read
+        - file_write_repo
+        - shell
+      forbidden:
+        - git_push
+        - destructive_shell
+    scope:
+      read:
+        - db/
+        - backend/app/  # read-only for query context
+        - workers/  # read-only for query context
+      write:
+        - db/
+    guardrails:
+      require_human_approval_for:
+        - DROP TABLE
+        - DROP COLUMN
+        - DROP SCHEMA
+        - TRUNCATE
+
+  infrastructure:
+    prompt_file: agents/16_infrastructure.md
+    category: development
+    model:
+      default: sonnet
+      escalation: opus
+      allow_escalation: true
+      temperature: 0.2
+      max_tokens: medium
+    tools:
+      allowed:
+        - file_read
+        - file_write_repo
+        - shell
+        - docker
+      forbidden:
+        - git_push
+        - destructive_shell
     scope:
       read:
         - docker-compose.yml
-        - docker-compose.*.yml
+        - observatory/
+        - searxng/
+        - scripts/
+        - config.yaml
+        - health-check.sh
         - backend/Dockerfile
         - workers/
       write:
         - docker-compose.yml
+        - observatory/
+        - searxng/
+        - scripts/
+        - config.yaml
+        - health-check.sh
         - backend/Dockerfile
-        - workers/
+        - backend/.dockerignore
+        - workers/.dockerignore
+        - workers/*/Dockerfile
+        - workers/*/requirements.txt
+        - backend/requirements.txt
+        - .dockerignore
+        - .gitignore
+
+  mcp_server:
+    prompt_file: agents/17_mcp_server.md
+    category: development
+    model:
+      default: haiku
+      escalation: sonnet
+      allow_escalation: true
+      temperature: 0.1
+      max_tokens: low
+    tools:
+      allowed:
+        - file_read
+        - file_write_repo
+        - shell
+      forbidden:
+        - docker
+        - git_push
+        - destructive_shell
+    scope:
+      read:
+        - workers/mcp-server/
+        - workers/shared/  # read-only for context
+      write:
+        - workers/mcp-server/
+
+  # ============================================================
+  # META AGENT (coordination)
+  # ============================================================
+
+  orchestrator_meta:
+    prompt_file: agents/20_orchestrator.md
+    category: meta
+    model:
+      default: opus
+      allow_escalation: false
+      temperature: 0.2
+      max_tokens: high
+    tools:
+      allowed:
+        - file_read
+        - shell
+      forbidden:
+        - file_write_repo
+        - git_push
+        - destructive_shell
+    scope:
+      read:
+        - "**"  # read anything for routing decisions
+      write: []  # never writes code -- delegates to specialists
+
+# ============================================================
+# TRIGGER ROUTING TABLE
+# ============================================================
+triggers:
+  - pattern: "backend/app/**"
+    primary: backend_api
+  - pattern: "backend/Dockerfile"
+    primary: infrastructure
+  - pattern: "backend/requirements.txt"
+    primary: infrastructure
+  - pattern: "workers/chunking/**"
+    primary: pipeline_workers
+  - pattern: "workers/embedding/**"
+    primary: pipeline_workers
+  - pattern: "workers/evaluation/**"
+    primary: pipeline_workers
+  - pattern: "workers/extraction/**"
+    primary: pipeline_workers
+  - pattern: "workers/conflict/**"
+    primary: pipeline_workers
+    secondary: database_schema
+  - pattern: "workers/crawler/**"
+    primary: pipeline_workers
+  - pattern: "workers/verify/**"
+    primary: pipeline_workers
+  - pattern: "workers/orchestrator/**"
+    primary: autonomous_agents
+  - pattern: "workers/researcher/**"
+    primary: autonomous_agents
+  - pattern: "workers/auditor/**"
+    primary: autonomous_agents
+  - pattern: "workers/monitoring/**"
+    primary: monitoring_healing
+  - pattern: "workers/healing/**"
+    primary: monitoring_healing
+  - pattern: "workers/shared/**"
+    primary: shared_libraries
+    secondary: pipeline_workers
+  - pattern: "workers/mcp-server/**"
+    primary: mcp_server
+  - pattern: "workers/*/Dockerfile"
+    primary: infrastructure
+  - pattern: "workers/*/requirements.txt"
+    primary: infrastructure
+  - pattern: "db/**"
+    primary: database_schema
+  - pattern: "docker-compose.yml"
+    primary: infrastructure
+    secondary: monitoring_healing
+  - pattern: "observatory/**"
+    primary: infrastructure
+  - pattern: "searxng/**"
+    primary: infrastructure
+  - pattern: "config.yaml"
+    primary: infrastructure

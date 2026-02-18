@@ -3,8 +3,11 @@
 Registers all route modules and provides the /health endpoint.
 """
 import os
+from pathlib import Path
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 import psycopg2
 import redis
@@ -42,6 +45,15 @@ app.include_router(dtc.router, tags=["DTC Codes"])
 app.include_router(crawl.router, tags=["Crawler"])
 app.include_router(stats.router, tags=["Statistics"])
 app.include_router(orchestration.router, tags=["Orchestration"])
+
+# Serve web dashboard
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
+
+    @app.get("/dashboard")
+    def dashboard():
+        return FileResponse(str(_static_dir / "index.html"))
 
 
 @app.get("/health", response_model=HealthResponse)

@@ -29,7 +29,8 @@ from detectors import (
     detect_error_rate_spikes,
     detect_processing_time_anomalies,
     detect_unhealthy_containers,
-    detect_stuck_documents
+    detect_stuck_documents,
+    detect_error_documents
 )
 from metrics_collector import collect_all_metrics
 from http_server import start_metrics_server
@@ -84,6 +85,8 @@ class MonitoringAgent:
             alerts.extend(detect_unhealthy_containers(metrics['container_health']))
 
             alerts.extend(detect_stuck_documents(metrics['document_stats']))
+
+            alerts.extend(detect_error_documents(metrics['document_stats']))
 
             # Send alerts to healing agent (or log if no healing agent)
             for alert in alerts:

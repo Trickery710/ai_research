@@ -10,10 +10,13 @@ Payload: document UUID string
 Next: jobs:resolve
 """
 import sys
+import re
 import json
 import time
 import traceback
 import uuid as uuid_mod
+
+DTC_PATTERN = re.compile(r'^[PBCU][0-9A-Fa-f]{4}$')
 
 sys.path.insert(0, "/app")
 
@@ -71,15 +74,30 @@ Respond with ONLY a JSON object (no other text):
       "related_dtc_codes": ["P0171"],
       "summary": "Updated gasket material to prevent vacuum leaks"
     }
-  ]
+  ],
+  "vehicles_mentioned": [
+    {
+      "make": "Toyota",
+      "model": "Camry",
+      "year_start": 2018,
+      "year_end": 2022,
+      "engine": "2.5L I4",
+      "transmission": "8-speed automatic",
+      "related_dtc_codes": ["P0171"]
+    }
+  ],
+  "document_category": "repair_procedure"
 }
 
 Rules:
 - Only extract data EXPLICITLY stated in the text. Do not fabricate.
 - Return empty arrays for categories with no matches.
+- DTC code must match pattern P/B/C/U followed by 4 hex digits (e.g. P0171, B0001, U0100). Reject anything else.
 - category: powertrain, chassis, body, or network
 - severity: critical, moderate, minor, or informational
-- likelihood: high, medium, or low"""
+- likelihood: high, medium, or low
+- vehicles_mentioned: Extract every vehicle make, model, year or year range mentioned. Include engine and transmission ONLY if explicitly stated. year_start/year_end are integers (use same value for both if only one year mentioned). related_dtc_codes links the vehicle to DTCs discussed in context.
+- document_category: Classify the text as ONE of: repair_procedure, diagnostic_guide, dtc_reference, tsb_bulletin, wiring_diagram, parts_catalog, forum_discussion, owners_manual, recall_notice, general_reference"""
 
 
 def parse_extraction(response_text):
@@ -109,7 +127,8 @@ def parse_extraction(response_text):
 
     return {
         "dtc_codes": [], "causes": [], "diagnostic_steps": [],
-        "sensors": [], "tsb_references": []
+        "sensors": [], "tsb_references": [], "vehicles_mentioned": [],
+        "document_category": ""
     }
 
 
@@ -144,7 +163,7 @@ def store_extraction(chunk_id, data):
         # --- DTC CODES ---
         for dtc in data.get("dtc_codes", []):
             code = (dtc.get("code") or "").strip().upper()
-            if not code:
+            if not code or not DTC_PATTERN.match(code):
                 continue
 
             cur.execute(
@@ -206,12 +225,17 @@ def store_extraction(chunk_id, data):
                 desc = (step.get("description") or "").strip()
                 if not desc:
                     continue
+                raw_order = step.get("step_order")
+                try:
+                    step_order = int(raw_order) if raw_order else 0
+                except (ValueError, TypeError):
+                    step_order = 0
                 cur.execute(
                     """INSERT INTO refined.diagnostic_steps
                        (dtc_id, step_order, description, tools_required,
                         expected_values, source_chunk_id, confidence_score)
                        VALUES (%s, %s, %s, %s, %s, %s, 0.5)""",
-                    (dtc_id, step.get("step_order", 0), desc,
+                    (dtc_id, step_order, desc,
                      _safe_str(step.get("tools_required", "")),
                      _safe_str(step.get("expected_values", "")),
                      chunk_id)
@@ -265,6 +289,43 @@ def store_extraction(chunk_id, data):
                  _safe_str(tsb.get("summary", "")), chunk_id)
             )
 
+        # --- VEHICLE MENTIONS ---
+        for veh in data.get("vehicles_mentioned", []):
+            make = (veh.get("make") or "").strip()
+            model = (veh.get("model") or "").strip()
+            if not make or not model:
+                continue
+            try:
+                year_start = int(veh["year_start"]) if veh.get("year_start") else None
+            except (ValueError, TypeError):
+                year_start = None
+            try:
+                year_end = int(veh["year_end"]) if veh.get("year_end") else None
+            except (ValueError, TypeError):
+                year_end = None
+            cur.execute(
+                """INSERT INTO refined.vehicle_mentions
+                   (source_chunk_id, make, model, year_start, year_end,
+                    engine, transmission, related_dtc_codes)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                (chunk_id, make, model, year_start, year_end,
+                 _safe_str(veh.get("engine", "")),
+                 _safe_str(veh.get("transmission", "")),
+                 _to_str_list(veh.get("related_dtc_codes", [])))
+            )
+
+        # --- DOCUMENT CATEGORY ---
+        doc_category = _safe_str(data.get("document_category", "")).strip()
+        if doc_category:
+            cur.execute(
+                """INSERT INTO refined.document_categories
+                   (source_chunk_id, category)
+                   VALUES (%s, %s)
+                   ON CONFLICT (source_chunk_id) DO UPDATE
+                   SET category = EXCLUDED.category""",
+                (chunk_id, doc_category)
+            )
+
         conn.commit()
     except Exception:
         conn.rollback()
@@ -277,7 +338,7 @@ def count_extracted(data):
     """Total number of items extracted across all categories."""
     return sum(len(data.get(k, [])) for k in [
         "dtc_codes", "causes", "diagnostic_steps",
-        "sensors", "tsb_references"
+        "sensors", "tsb_references", "vehicles_mentioned"
     ])
 
 

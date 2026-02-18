@@ -22,6 +22,7 @@ COPY conflict/worker.py .
 COPY conflict/scorer.py .
 COPY conflict/merger.py .
 COPY conflict/upserter.py .
+COPY conflict/vehicle_linker.py .
 
 # Remove any Python cache files
 RUN find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \

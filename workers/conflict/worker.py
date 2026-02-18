@@ -136,6 +136,16 @@ def run_knowledge_graph_upsert() -> dict:
         return {"error": str(e)}
 
 
+def run_vehicle_linking(doc_id) -> dict:
+    """Link extracted vehicle mentions to vehicle catalog."""
+    try:
+        from vehicle_linker import link_vehicles_for_document
+        return link_vehicles_for_document(doc_id)
+    except Exception as e:
+        logger.warning(f"Vehicle linking failed: {e}")
+        return {"error": str(e)}
+
+
 def process_document(doc_id):
     """Run conflict resolution for a document, then mark it complete."""
     start_time = time.time()
@@ -143,13 +153,16 @@ def process_document(doc_id):
     update_document_stage(doc_id, "resolving")
     log_processing(doc_id, "resolving", "started")
 
-    # Legacy: recalculate refined.dtc_codes confidence
+    # Recalculate refined.dtc_codes confidence
     dtc_updated = recalculate_dtc_confidence()
     causes_deduped = deduplicate_causes()
     steps_deduped = deduplicate_diagnostic_steps()
 
-    # New: knowledge graph upsert with scoring + merging
+    # Knowledge graph upsert with scoring + merging
     kg_stats = run_knowledge_graph_upsert()
+
+    # Vehicle linking: match mentions to catalog, build relationships
+    vl_stats = run_vehicle_linking(doc_id)
 
     duration_ms = int((time.time() - start_time) * 1000)
     kg_summary = ""
@@ -161,11 +174,21 @@ def process_document(doc_id):
             f" merged={kg_stats.get('entities_merged', 0)}"
         )
 
+    vl_summary = ""
+    if vl_stats and not vl_stats.get("error"):
+        vl_summary = (
+            f", VL: mentions={vl_stats.get('mentions_processed', 0)}"
+            f" matched={vl_stats.get('vehicles_matched', 0)}"
+            f" created={vl_stats.get('vehicles_created', 0)}"
+            f" dtc_links={vl_stats.get('dtc_links_created', 0)}"
+            f" cat={'Y' if vl_stats.get('doc_category_set') else 'N'}"
+        )
+
     message = (
         f"DTC scores updated: {dtc_updated}, "
         f"causes deduped: {causes_deduped}, "
         f"steps deduped: {steps_deduped}"
-        f"{kg_summary}"
+        f"{kg_summary}{vl_summary}"
     )
     log_processing(doc_id, "resolving", "completed", message, duration_ms)
 

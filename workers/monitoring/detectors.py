@@ -170,3 +170,22 @@ def detect_stuck_documents(document_stats: Dict) -> List[Dict]:
             })
 
     return alerts
+
+
+def detect_error_documents(document_stats: Dict) -> List[Dict]:
+    """Detect accumulated error documents that should be retried."""
+    alerts = []
+
+    error_count = document_stats.get('by_stage', {}).get('error', 0)
+    error_threshold = int(os.environ.get("ERROR_DOCUMENT_THRESHOLD", "10"))
+
+    if error_count >= error_threshold:
+        alerts.append({
+            'type': 'error_documents_accumulated',
+            'severity': 'high',
+            'component': 'pipeline-errors',
+            'details': f"{error_count} documents in error state need retry",
+            'recommended_action': 'requeue_errors:extracting'
+        })
+
+    return alerts

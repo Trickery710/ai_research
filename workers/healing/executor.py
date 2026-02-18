@@ -20,6 +20,7 @@ def execute_healing_action(action: str, alert: Dict, analysis: Dict) -> Tuple[bo
         'restart_worker': restart_worker,
         'restart_container': restart_container,
         'requeue_documents': requeue_documents,
+        'requeue_errors': requeue_error_documents,
         'clear_stale_locks': clear_stale_locks,
         'escalate_to_human': escalate_to_human
     }
@@ -122,7 +123,7 @@ def requeue_documents(stage: str, alert: Dict, analysis: Dict) -> Tuple[bool, st
         redis_client = get_redis()
         count = 0
         for row in rows:
-            doc_id = str(row['id'])
+            doc_id = str(row[0])
             redis_client.lpush(queue_name, doc_id)
             count += 1
 
@@ -130,6 +131,61 @@ def requeue_documents(stage: str, alert: Dict, analysis: Dict) -> Tuple[bool, st
 
     except Exception as e:
         return False, f"Failed to requeue documents: {str(e)}"
+
+
+def requeue_error_documents(target_stage: str, alert: Dict, analysis: Dict) -> Tuple[bool, str]:
+    """Re-queue documents in 'error' state back to a target processing stage.
+
+    The target_stage parameter determines which queue to push them to.
+    Documents are reset from 'error' back to the target stage so the
+    pipeline can retry them.
+    """
+    if not target_stage:
+        target_stage = 'extracting'  # Most errors occur at extraction
+
+    stage_to_queue = {
+        'chunking': 'jobs:chunk',
+        'embedding': 'jobs:embed',
+        'evaluating': 'jobs:evaluate',
+        'extracting': 'jobs:extract',
+        'resolving': 'jobs:resolve',
+        'crawling': 'jobs:crawl'
+    }
+
+    queue_name = stage_to_queue.get(target_stage)
+    if not queue_name:
+        return False, f"Unknown target stage: {target_stage}"
+
+    try:
+        rows = execute_query(
+            """SELECT id FROM research.documents
+               WHERE processing_stage = 'error'
+               ORDER BY updated_at ASC
+               LIMIT 200""",
+            fetch=True
+        )
+
+        if not rows:
+            return True, "No documents in error state"
+
+        redis_client = get_redis()
+        count = 0
+        for row in rows:
+            doc_id = str(row[0])
+            # Reset stage so the worker picks it up cleanly
+            execute_query(
+                """UPDATE research.documents
+                   SET processing_stage = %s, error_message = NULL, updated_at = NOW()
+                   WHERE id = %s""",
+                (target_stage, doc_id)
+            )
+            redis_client.lpush(queue_name, doc_id)
+            count += 1
+
+        return True, f"Re-queued {count} error documents to {queue_name}"
+
+    except Exception as e:
+        return False, f"Failed to requeue error documents: {str(e)}"
 
 
 def clear_stale_locks(param: str, alert: Dict, analysis: Dict) -> Tuple[bool, str]:
